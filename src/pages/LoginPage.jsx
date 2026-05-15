@@ -42,7 +42,7 @@ export default function LoginPage() {
     }}>
       <div style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 52, marginBottom: 12 }}>🪷</div>
+          <img src="/logo.jpeg" alt="Kamala Niketan" style={{width: 38, height: 38, borderRadius: 10, objectFit: 'cover'}} />
           <div style={{ fontFamily: 'Playfair Display', fontSize: 28, fontWeight: 700, color: '#2D3748' }}>Kamala Niketan</div>
           <div style={{ fontSize: 14, color: '#718096', marginTop: 4 }}>Student Progress Tracker</div>
         </div>
