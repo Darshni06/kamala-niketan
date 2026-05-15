@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function getUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isAdmin() {
+      return isSignedIn() && getUser().role == 'admin';
+    }
+    function isTeacher() {
+      return isSignedIn() && getUser().role == 'teacher';
+    }
+    function isTeacherOfClass(classId) {
+      return isTeacher() && getUser().classId == classId;
+    }
+
+    // Users — admins can manage, teachers can read own
+    match /users/{uid} {
+      allow read:   if isSignedIn() && (isAdmin() || request.auth.uid == uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || request.auth.uid == uid;
+      allow delete: if isAdmin();
+    }
+
+    // Classes — read all signed-in, write admin only
+    match /classes/{classId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Students — admin full, teacher reads own class
+    match /students/{studentId} {
+      allow read:   if isAdmin() || (isTeacher() && getUser().classId == resource.data.classId);
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Curriculum areas — admin writes, all read
+    match /areas/{areaId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+
+      match /subAreas/{subAreaId} {
+        allow read:  if isSignedIn();
+        allow write: if isAdmin();
+
+        match /skills/{skillId} {
+          allow read:  if isSignedIn();
+          allow write: if isAdmin();
+        }
+      }
+    }
+
+    // Progress records — teachers write for own class, admin reads all
+    match /progress/{recordId} {
+      allow read:   if isAdmin() || (isTeacher() && getUser().classId == resource.data.classId);
+      allow create: if isTeacher() && getUser().classId == request.resource.data.classId;
+      allow update: if isAdmin() || (isTeacher() && getUser().classId == resource.data.classId);
+      allow delete: if isAdmin();
+    }
+
+    // Teacher notes — same rules as progress
+    match /teacherNotes/{noteId} {
+      allow read:   if isAdmin() || (isTeacher() && getUser().classId == resource.data.classId);
+      allow create: if isTeacher() && getUser().classId == request.resource.data.classId;
+      allow update: if isAdmin() || (isTeacher() && getUser().classId == resource.data.classId);
+      allow delete: if isAdmin();
+    }
+  }
+}
