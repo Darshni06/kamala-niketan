@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { saveProgressRecord, saveTeacherNote, getProgressByStudent, getAllTeacherNotesByStudent } from '../firebase/services'
 import { useAuth } from '../contexts/AuthContext'
-import { LEVELS, LEVEL_COLORS, LEVEL_FULL } from '../utils/theme'
-import { GradeBadge, LevelHeader, LevelPill, Spinner } from './UI'
+import { LEVELS, LEVEL_COLORS } from '../utils/theme'
+import { GradeBadge, Spinner } from './UI'
 
 export default function ProgressModal({ student, curriculum, onClose, onSaved }) {
   const { profile } = useAuth()
@@ -178,15 +178,41 @@ export default function ProgressModal({ student, curriculum, onClose, onSaved })
                 {/* Row 4: Skills table */}
                 {subArea && skills.length > 0 && (
                   <div className="glass" style={{ borderRadius: 12, padding: '4px 14px', marginBottom: 14 }}>
-                    <LevelHeader />
+                    {/* Header row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
+                      <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>Skill</div>
+                      {LEVELS.map(l => (
+                        <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
+                      ))}
+                    </div>
+                    {/* Skill rows */}
                     {skills.map((skill) => {
                       const curr = levels[skill.id]?.[term]
                       return (
-                        <div key={skill.id} className="skill-row">
+                        <div key={skill.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0', borderBottom: '1px solid #F7FAFC' }}>
                           <div style={{ flex: 1, fontSize: 12, color: '#4A5568', lineHeight: 1.4, paddingRight: 8 }}>{skill.name}</div>
-                          {LEVELS.map(l => (
-                            <LevelPill key={l} level={l} selected={curr === l} onClick={() => setSkillLevel(skill.id, term, l)} />
-                          ))}
+                          {LEVELS.map(l => {
+                            const isSelected = curr === l
+                            return (
+                              <div
+                                key={l}
+                                onClick={() => setSkillLevel(skill.id, term, l)}
+                                style={{
+                                  width: 38, height: 38, borderRadius: 8,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                                  transition: 'all .15s',
+                                  background: isSelected ? LEVEL_COLORS[l] : `${LEVEL_COLORS[l]}22`,
+                                  color: isSelected ? 'white' : LEVEL_COLORS[l],
+                                  border: `2px solid ${isSelected ? LEVEL_COLORS[l] : 'transparent'}`,
+                                  transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                                  boxShadow: isSelected ? `0 2px 8px ${LEVEL_COLORS[l]}55` : 'none',
+                                  userSelect: 'none',
+                                }}>
+                                {l}
+                              </div>
+                            )
+                          })}
                         </div>
                       )
                     })}
