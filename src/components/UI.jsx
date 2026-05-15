@@ -32,7 +32,7 @@ export function Sidebar({ active, onNav }) {
       {/* Brand */}
       <div style={{ padding: '24px 20px 16px', borderBottom: '1px solid rgba(255,255,255,.15)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(255,255,255,.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🪷</div>
+          <img src="/logo.jpeg" alt="Kamala Niketan" style={{width: 38, height: 38, borderRadius: 10, objectFit: 'cover'}} />
           <div>
             <div style={{ fontFamily: 'Playfair Display', fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.2 }} className="brand-text">Kamala</div>
             <div style={{ fontFamily: 'Playfair Display', fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,.8)', lineHeight: 1.2 }} className="brand-text">Niketan</div>
