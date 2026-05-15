@@ -21,13 +21,23 @@ export const resetPassword = (email) => sendPasswordResetEmail(auth, email)
 
 // Create a new user account (admin use only)
 export const createUser = async (email, password, profileData) => {
-  const cred = await createUserWithEmailAndPassword(auth, email, password)
+  // Use a secondary app instance so admin session is not disturbed
+  const { initializeApp } = await import('firebase/app')
+  const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth')
+  
+  const secondaryApp = initializeApp(firebaseConfig, 'Secondary_' + Date.now())
+  const secondaryAuth = getAuth(secondaryApp)
+  
+  const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password)
   await setDoc(doc(db, 'users', cred.user.uid), {
     uid: cred.user.uid,
     email,
     ...profileData,
     createdAt: serverTimestamp(),
   })
+  
+  // Clean up secondary app
+  await secondaryApp.delete()
   return cred.user
 }
 
