@@ -22,24 +22,30 @@ export const resetPassword = (email) => sendPasswordResetEmail(auth, email)
 // Create a new user account (admin use only)
 // Uses a secondary Firebase app so admin session is never interrupted
 export const createUser = async (email, password, profileData) => {
-  // Save current admin user before creating teacher
-  const currentAdmin = auth.currentUser
+  const { initializeApp, getApps, deleteApp } = await import('firebase/app')
+  const { getAuth, createUserWithEmailAndPassword: createUser2 } = await import('firebase/auth')
 
-  const cred = await createUserWithEmailAndPassword(auth, email, password)
-  await setDoc(doc(db, 'users', cred.user.uid), {
-    uid: cred.user.uid,
-    email,
-    ...profileData,
-    createdAt: serverTimestamp(),
-  })
+  // Get the main app config
+  const mainApp = getApps()[0]
+  const config  = mainApp.options
 
-  // Sign admin back in immediately
-  if (currentAdmin?.email) {
-    // Sign out the newly created teacher account
-    await signOut(auth)
+  // Create a temporary secondary app instance
+  const secondaryApp  = initializeApp(config, 'temp_admin_create_' + Date.now())
+  const secondaryAuth = getAuth(secondaryApp)
+
+  try {
+    const cred = await createUser2(secondaryAuth, email, password)
+    await setDoc(doc(db, 'users', cred.user.uid), {
+      uid: cred.user.uid,
+      email,
+      ...profileData,
+      createdAt: serverTimestamp(),
+    })
+    return cred.user
+  } finally {
+    // Always clean up the secondary app — admin session untouched
+    await deleteApp(secondaryApp)
   }
-
-  return cred.user
 }
 
 // ─── Users / Profiles ─────────────────────────────────────────────────────────
@@ -205,12 +211,12 @@ export const deleteSkill = async (areaId, subAreaId, skillId) => {
 // ─── Progress Records ─────────────────────────────────────────────────────────
 
 export const saveProgressRecord = async (data) => {
-  // NEW — encode to remove any special characters
-  const docId = btoa(data.studentId + '|' + data.skillId + '|' + data.term).replace(/[/+=]/g, '_')
+  // Safe deterministic doc ID — no composite index needed
+  const raw   = data.studentId + '_' + data.skillId + '_' + data.term
+  const docId = raw.replace(/[^a-zA-Z0-9_-]/g, '-')
   const docRef = doc(db, 'progress', docId)
   await setDoc(docRef, {
     ...data,
-    createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }, { merge: true })
   return docId

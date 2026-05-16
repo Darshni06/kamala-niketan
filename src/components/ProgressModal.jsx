@@ -49,61 +49,71 @@ export default function ProgressModal({ student, curriculum, onClose, onSaved })
     }))
   }
 
+  const [saveError, setSaveError] = useState('')
+
   const handleSave = async () => {
-  if (!area || !subArea) return
-  setSaving(true)
-  try {
-    const areaObj = curriculum.find(a => a.id === area)
-    const subObj = areaObj?.subAreas?.find(s => s.id === subArea)
+    if (!area || !subArea) return
+    setSaving(true)
+    setSaveError('')
 
-    const promises = skills.map(async (skill) => {
-      const lvl = levels[skill.id]?.[term]
-      if (!lvl) return
+    // Find which skills have a level selected for this term
+    const skillsToSave = skills.filter(sk => levels[sk.id]?.[term])
 
-      console.log('Saving skill:', skill.id, skill.name, '| level:', lvl, '| student:', student.id)
-
-      return saveProgressRecord({
-        studentId: student.id,
-        studentName: student.name,
-        classId: student.classId,
-        grade: student.grade,
-        areaId: area,
-        areaName: areaObj?.name || '',
-        subAreaId: subArea,
-        subAreaName: subObj?.name || '',
-        skillId: skill.id,
-        skillName: skill.name,
-        term,
-        level: lvl,
-        dateOfPresentation: date,
-        practiceCount: count ? Number(count) : null,
-        loggedBy: profile?.uid || '',
-        loggedByName: profile?.name || '',
-      })
-    })
-
-    if (note.trim()) {
-      promises.push(saveTeacherNote({
-        studentId: student.id,
-        classId: student.classId,
-        areaId: area,
-        areaName: areaObj?.name || '',
-        term,
-        note: note.trim(),
-        loggedBy: profile?.uid || '',
-      }))
+    if (skillsToSave.length === 0 && !note.trim()) {
+      setSaveError('Please select at least one level before saving.')
+      setSaving(false)
+      return
     }
 
-    await Promise.all(promises)
-    setSaved(true)
-    setTimeout(() => { onSaved?.(); onClose() }, 1300)
+    try {
+      const areaObj = curriculum.find(a => a.id === area)
+      const subObj  = areaObj?.subAreas?.find(s => s.id === subArea)
 
-  } catch (err) {
-    console.error(err)
-  } finally {
-    setSaving(false)
+      // Save one by one (not Promise.all) so we can catch individual failures
+      for (const skill of skillsToSave) {
+        const lvl = levels[skill.id][term]
+        await saveProgressRecord({
+          studentId:          student.id,
+          studentName:        student.name,
+          classId:            student.classId,
+          grade:              student.grade,
+          areaId:             area,
+          areaName:           areaObj?.name || '',
+          subAreaId:          subArea,
+          subAreaName:        subObj?.name  || '',
+          skillId:            skill.id,
+          skillName:          skill.name,
+          term,
+          level:              lvl,
+          dateOfPresentation: date,
+          practiceCount:      count ? Number(count) : null,
+          loggedBy:           profile?.uid  || '',
+          loggedByName:       profile?.name || '',
+        })
+      }
+
+      // Save teacher note if filled
+      if (note.trim()) {
+        await saveTeacherNote({
+          studentId: student.id,
+          classId:   student.classId,
+          areaId:    area,
+          areaName:  areaObj?.name || '',
+          term,
+          note:      note.trim(),
+          loggedBy:  profile?.uid || '',
+        })
+      }
+
+      setSaved(true)
+      setTimeout(() => { onSaved?.(); onClose() }, 1300)
+    } catch (err) {
+      console.error('Save failed:', err)
+      setSaveError('Save failed: ' + (err?.message || 'Unknown error. Check console.'))
+    } finally {
+      setSaving(false)
+    }
   }
-}
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -247,11 +257,18 @@ export default function ProgressModal({ student, curriculum, onClose, onSaved })
                 )}
 
                 {subArea && (
-                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                    <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-                    <button className="btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving}>
-                      {saving ? 'Saving…' : 'Save Progress'}
-                    </button>
+                  <div style={{ marginTop: 16 }}>
+                    {saveError && (
+                      <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>
+                        ⚠️ {saveError}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+                      <button className="btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving}>
+                        {saving ? 'Saving…' : 'Save Progress'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </>
