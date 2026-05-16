@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getProgressByClass, getProgressByStudent, getAllStudents, getStudentsByClass } from '../../firebase/services'
+import { getProgressByClass, getProgressByStudent, getAllStudents, getStudentsByClass, getAllProgress } from '../../firebase/services'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, GradeBadge } from '../../components/UI'
 import { GRAPH_TYPES, LEVEL_COLORS, LEVEL_FULL, LEVELS, CLASSES, GRADES, TEAL, PEACH } from '../../utils/theme'
@@ -38,7 +38,7 @@ export default function ReportsPage({ role }) {
       try {
         const classId = role === 'teacher' ? profile?.classId : (classFilter !== 'All' ? classFilter : null)
         const [recs, studs] = await Promise.all([
-          classId ? getProgressByClass(classId) : Promise.resolve([]),
+          classId ? getProgressByClass(classId) : getAllProgress(),
           classId ? getStudentsByClass(classId) : getAllStudents(),
         ])
         setRecords(recs)
@@ -69,7 +69,7 @@ export default function ReportsPage({ role }) {
 
   // Donut data
   const donutData = ['M', 'A', 'R', 'P'].map(l => ({
-    name: LEVEL_FULL[l], value: records.filter(r => r.level === l && (termFilter === 'All' || r.term === termFilter)).length || Math.floor(Math.random() * 30) + 5,
+    name: LEVEL_FULL[l], value: records.filter(r => r.level === l && (termFilter === 'All' || r.term === termFilter)).length,
     color: LEVEL_COLORS[l],
   }))
 
@@ -87,14 +87,14 @@ export default function ReportsPage({ role }) {
   const heatData = heatAreas.map(area => {
     const aRecs = records.filter(r => r.areaName === area && (termFilter === 'All' || r.term === termFilter))
     const row = { area: area.length > 14 ? area.slice(0, 13) + '…' : area }
-    LEVELS.filter(l => l !== 'NA').forEach(l => { row[l] = aRecs.filter(r => r.level === l).length || Math.floor(Math.random() * 25) + 3 })
+    LEVELS.filter(l => l !== 'NA').forEach(l => { row[l] = aRecs.filter(r => r.level === l).length })
     return row
   })
 
   // Bubble — area × term × count
   const bubbleData = heatAreas.flatMap((area, ai) =>
     ['T1', 'T2', 'T3'].map((t, ti) => {
-      const n = records.filter(r => r.areaName === area && r.term === t).length || Math.floor(Math.random() * 20) + 4
+      const n = records.filter(r => r.areaName === area && r.term === t).length
       return { x: ai, y: ti, z: n, area: area.split(' ').slice(-1)[0], term: t }
     })
   )

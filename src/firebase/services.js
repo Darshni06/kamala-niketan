@@ -211,29 +211,15 @@ export const deleteSkill = async (areaId, subAreaId, skillId) => {
 // ─── Progress Records ─────────────────────────────────────────────────────────
 
 export const saveProgressRecord = async (data) => {
-  // Check if a record exists for same student+skill+term
-  const q = query(
-    collection(db, 'progress'),
-    where('studentId', '==', data.studentId),
-    where('skillId',   '==', data.skillId),
-    where('term',      '==', data.term)
-  )
-  const snap = await getDocs(q)
-  if (!snap.empty) {
-    // Update existing record
-    await updateDoc(snap.docs[0].ref, {
-      ...data,
-      updatedAt: serverTimestamp(),
-    })
-    return snap.docs[0].id
-  } else {
-    const ref = await addDoc(collection(db, 'progress'), {
-      ...data,
-      createdAt:  serverTimestamp(),
-      updatedAt:  serverTimestamp(),
-    })
-    return ref.id
-  }
+  // Deterministic doc ID = no composite index needed, natural upsert
+  const docId  = data.studentId + '__' + data.skillId + '__' + data.term
+  const docRef = doc(db, 'progress', docId)
+  await setDoc(docRef, {
+    ...data,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+  return docId
 }
 
 export const getProgressByStudent = async (studentId) => {
@@ -262,6 +248,12 @@ export const getProgressByTeacher = async (teacherId) => {
     where('loggedBy', '==', teacherId),
     orderBy('updatedAt', 'desc')
   )
+  const snap = await getDocs(q)
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export const getAllProgress = async () => {
+  const q = query(collection(db, 'progress'), orderBy('updatedAt', 'desc'))
   const snap = await getDocs(q)
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
