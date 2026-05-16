@@ -133,31 +133,55 @@ export const bulkAddStudents = async (students) => {
 // ─── Curriculum ───────────────────────────────────────────────────────────────
 
 export const getCurriculumByGrade = async (grade) => {
-  console.log('[Curriculum] Loading grade:', grade)
   try {
     const q = query(collection(db, 'areas'), where('grade', '==', grade))
     const areasSnap = await getDocs(q)
-    console.log('[Curriculum] Areas found:', areasSnap.size)
     const areas = []
     for (const areaDoc of areasSnap.docs) {
       const areaData = { id: areaDoc.id, ...areaDoc.data(), subAreas: [] }
-      console.log('[Curriculum] Area:', areaData.name)
       const subSnap = await getDocs(collection(db, 'areas', areaDoc.id, 'subAreas'))
-      console.log('[Curriculum] SubAreas in', areaData.name, ':', subSnap.size)
-      for (const subDoc of subSnap.docs) {
-        const subData = { id: subDoc.id, ...subDoc.data(), skills: [] }
-        const skillSnap = await getDocs(collection(db, 'areas', areaDoc.id, 'subAreas', subDoc.id, 'skills'))
-        console.log('[Curriculum] Skills in', subData.name, ':', skillSnap.size)
-        subData.skills = skillSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-        areaData.subAreas.push(subData)
+
+      // Group subArea docs into one virtual subArea per area
+      // Because in this Firestore structure, each "subArea" doc IS a skill
+      const skillDocs = subSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+      // Check if skills subcollection exists in first subArea doc
+      // If skills count > 0, use nested structure. Otherwise treat subAreas as skills.
+      let hasSkillsSubcollection = false
+      if (subSnap.docs.length > 0) {
+        const firstSkillSnap = await getDocs(
+          collection(db, 'areas', areaDoc.id, 'subAreas', subSnap.docs[0].id, 'skills')
+        )
+        hasSkillsSubcollection = firstSkillSnap.size > 0
       }
+
+      if (hasSkillsSubcollection) {
+        // Proper nested structure: area → subArea → skills
+        for (const subDoc of subSnap.docs) {
+          const subData = { id: subDoc.id, ...subDoc.data(), skills: [] }
+          const skillSnap = await getDocs(
+            collection(db, 'areas', areaDoc.id, 'subAreas', subDoc.id, 'skills')
+          )
+          subData.skills = skillSnap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          areaData.subAreas.push(subData)
+        }
+      } else {
+        // Flat structure: subArea docs ARE the skills
+        // Create one virtual subArea containing all skills
+        const virtualSubArea = {
+          id: areaDoc.id + '_skills',
+          name: areaData.name,
+          skills: skillDocs.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+        }
+        areaData.subAreas.push(virtualSubArea)
+      }
+
       areaData.subAreas.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       areas.push(areaData)
     }
     areas.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    console.log('[Curriculum] Done. Total areas:', areas.length)
     return areas
   } catch (err) {
     console.error('[Curriculum] FAILED:', err.code, err.message)
