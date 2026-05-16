@@ -172,11 +172,7 @@ export default function ReportsPage({ role }) {
         <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Area Proficiency Radar</div>
         <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>% of records at R or P level per curriculum area</div>
         <ResponsiveContainer width="100%" height={300}>
-          <RadarChart data={radarData.length > 0 ? radarData : [
-            { area: 'Physical', score: 78 }, { area: 'Cognitive', score: 65 },
-            { area: 'Language', score: 82 }, { area: 'SocioEmot.', score: 90 },
-            { area: 'Learning', score: 70 }, { area: 'Art', score: 88 },
-          ]}>
+          <RadarChart data={radarData.length > 0 ? radarData : []}>
             <PolarGrid stroke="#EDF2F7" />
             <PolarAngleAxis dataKey="area" tick={{ fontSize: 11, fill: '#718096' }} />
             <Radar name="Proficiency %" dataKey="score" stroke={TEAL} fill={TEAL} fillOpacity={0.25} />

@@ -82,17 +82,20 @@ export const getStudentsByClass = async (classId) => {
   const q = query(
     collection(db, 'students'),
     where('classId', '==', classId),
-    where('status', '==', 'active'),
-    orderBy('name')
+    where('status', '==', 'active')
   )
   const snap = await getDocs(q)
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export const getAllStudents = async () => {
-  const q = query(collection(db, 'students'), where('status', '==', 'active'), orderBy('name'))
+  const q = query(collection(db, 'students'), where('status', '==', 'active'))
   const snap = await getDocs(q)
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export const getStudent = async (studentId) => {
@@ -130,28 +133,25 @@ export const bulkAddStudents = async (students) => {
 // ─── Curriculum ───────────────────────────────────────────────────────────────
 
 export const getCurriculumByGrade = async (grade) => {
-  const q = query(collection(db, 'areas'), where('grade', '==', grade), orderBy('order'))
+  // No orderBy to avoid composite index requirement — sort client-side by order field
+  const q = query(collection(db, 'areas'), where('grade', '==', grade))
   const areasSnap = await getDocs(q)
   const areas = []
   for (const areaDoc of areasSnap.docs) {
     const areaData = { id: areaDoc.id, ...areaDoc.data(), subAreas: [] }
-    const subQ = query(
-      collection(db, 'areas', areaDoc.id, 'subAreas'),
-      orderBy('order')
-    )
-    const subSnap = await getDocs(subQ)
+    const subSnap = await getDocs(collection(db, 'areas', areaDoc.id, 'subAreas'))
     for (const subDoc of subSnap.docs) {
       const subData = { id: subDoc.id, ...subDoc.data(), skills: [] }
-      const skillQ = query(
-        collection(db, 'areas', areaDoc.id, 'subAreas', subDoc.id, 'skills'),
-        orderBy('order')
-      )
-      const skillSnap = await getDocs(skillQ)
-      subData.skills = skillSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const skillSnap = await getDocs(collection(db, 'areas', areaDoc.id, 'subAreas', subDoc.id, 'skills'))
+      subData.skills = skillSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       areaData.subAreas.push(subData)
     }
+    areaData.subAreas.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     areas.push(areaData)
   }
+  areas.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   return areas
 }
 
@@ -223,21 +223,13 @@ export const saveProgressRecord = async (data) => {
 }
 
 export const getProgressByStudent = async (studentId) => {
-  const q = query(
-    collection(db, 'progress'),
-    where('studentId', '==', studentId),
-    orderBy('updatedAt', 'desc')
-  )
+  const q = query(collection(db, 'progress'), where('studentId', '==', studentId))
   const snap = await getDocs(q)
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
 export const getProgressByClass = async (classId) => {
-  const q = query(
-    collection(db, 'progress'),
-    where('classId', '==', classId),
-    orderBy('updatedAt', 'desc')
-  )
+  const q = query(collection(db, 'progress'), where('classId', '==', classId))
   const snap = await getDocs(q)
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
@@ -253,8 +245,7 @@ export const getProgressByTeacher = async (teacherId) => {
 }
 
 export const getAllProgress = async () => {
-  const q = query(collection(db, 'progress'), orderBy('updatedAt', 'desc'))
-  const snap = await getDocs(q)
+  const snap = await getDocs(collection(db, 'progress'))
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
