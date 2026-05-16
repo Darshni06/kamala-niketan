@@ -50,58 +50,60 @@ export default function ProgressModal({ student, curriculum, onClose, onSaved })
   }
 
   const handleSave = async () => {
-    if (!area || !subArea) return
-    setSaving(true)
-    try {
-      const areaObj   = curriculum.find(a => a.id === area)
-      const subObj    = areaObj?.subAreas?.find(s => s.id === subArea)
+  if (!area || !subArea) return
+  setSaving(true)
+  try {
+    const areaObj = curriculum.find(a => a.id === area)
+    const subObj = areaObj?.subAreas?.find(s => s.id === subArea)
 
-      // Save a progress record for each skill that has a level set for this term
-      const promises = skills.map(async (skill) => {
-        const lvl = levels[skill.id]?.[term]
-        if (!lvl) return
-        return saveProgressRecord({
-          studentId:        student.id,
-          studentName:      student.name,
-          classId:          student.classId,
-          grade:            student.grade,
-          areaId:           area,
-          areaName:         areaObj?.name || '',
-          subAreaId:        subArea,
-          subAreaName:      subObj?.name  || '',
-          skillId:          skill.id,
-          skillName:        skill.name,
-          term,
-          level:            lvl,
-          dateOfPresentation: date,
-          practiceCount:    count ? Number(count) : null,
-          loggedBy:         profile?.uid || '',
-          loggedByName:     profile?.name || '',
-        })
+    const promises = skills.map(async (skill) => {
+      const lvl = levels[skill.id]?.[term]
+      if (!lvl) return
+
+      console.log('Saving skill:', skill.id, skill.name, '| level:', lvl, '| student:', student.id)
+
+      return saveProgressRecord({
+        studentId: student.id,
+        studentName: student.name,
+        classId: student.classId,
+        grade: student.grade,
+        areaId: area,
+        areaName: areaObj?.name || '',
+        subAreaId: subArea,
+        subAreaName: subObj?.name || '',
+        skillId: skill.id,
+        skillName: skill.name,
+        term,
+        level: lvl,
+        dateOfPresentation: date,
+        practiceCount: count ? Number(count) : null,
+        loggedBy: profile?.uid || '',
+        loggedByName: profile?.name || '',
       })
+    })
 
-      // Save teacher note for this area+term
-      if (note.trim()) {
-        promises.push(saveTeacherNote({
-          studentId:  student.id,
-          classId:    student.classId,
-          areaId:     area,
-          areaName:   areaObj?.name || '',
-          term,
-          note:       note.trim(),
-          loggedBy:   profile?.uid || '',
-        }))
-      }
-
-      await Promise.all(promises)
-      setSaved(true)
-      setTimeout(() => { onSaved?.(); onClose() }, 1300)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setSaving(false)
+    if (note.trim()) {
+      promises.push(saveTeacherNote({
+        studentId: student.id,
+        classId: student.classId,
+        areaId: area,
+        areaName: areaObj?.name || '',
+        term,
+        note: note.trim(),
+        loggedBy: profile?.uid || '',
+      }))
     }
+
+    await Promise.all(promises)
+    setSaved(true)
+    setTimeout(() => { onSaved?.(); onClose() }, 1300)
+
+  } catch (err) {
+    console.error(err)
+  } finally {
+    setSaving(false)
   }
+}
 
   return (
     <div className="modal-overlay" onClick={onClose}>
