@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { collection, doc, getDocs, setDoc, addDoc, query, where, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../contexts/AuthContext'
 import { LEVELS, LEVEL_COLORS, LEVEL_FULL } from '../../utils/theme'
 import { GradeBadge, Spinner } from './UI'
 
