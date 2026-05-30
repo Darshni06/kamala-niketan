@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { collection, doc, getDocs, setDoc, addDoc, query, where, serverTimestamp } from 'firebase/firestore'
-import { db } from '../firebase/config'
-import { useAuth } from '../contexts/AuthContext'
-import { LEVELS, LEVEL_COLORS, LEVEL_FULL } from '../utils/theme'
+import { db } from '../../firebase/config'
+import { useAuth } from '../../contexts/AuthContext'
+import { LEVELS, LEVEL_COLORS, LEVEL_FULL } from '../../utils/theme'
 import { GradeBadge, Spinner } from './UI'
 
 // ─── Firestore helpers for 4-layer curriculum ─────────────────────────────────
@@ -44,7 +44,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   const [selSkill,    setSelSkill]    = useState('')
   const [term,        setTerm]        = useState('T1')
   const [date,        setDate]        = useState(new Date().toISOString().split('T')[0])
-  const [count,       setCount]       = useState('')
+  const [counts,      setCounts]      = useState({})  // activityId → practice count
   const [note,        setNote]        = useState('')
 
   // levels: activityId → level string
@@ -128,7 +128,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           level:              lvl,
           // metadata
           dateOfPresentation: date,
-          practiceCount:      count ? Number(count) : null,
+          practiceCount:      counts[act.id] ? Number(counts[act.id]) : null,
           loggedBy:           profile?.uid  || '',
           loggedByName:       profile?.name || '',
           updatedAt:          serverTimestamp(),
@@ -227,19 +227,12 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                   </div>
                 )}
 
-                {/* Row 3: Date + Practice count */}
+                {/* Row 3: Date of Presentation only */}
                 {selSkill && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-                    <div>
-                      <label className="form-label">Date of Presentation</label>
-                      <input type="date" className="form-input" value={date}
-                        onChange={e => setDate(e.target.value)} />
-                    </div>
-                    <div>
-                      <label className="form-label">Practice Count</label>
-                      <input type="number" className="form-input" placeholder="e.g. 3"
-                        value={count} onChange={e => setCount(e.target.value)} min="0" />
-                    </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <label className="form-label">Date of Presentation</label>
+                    <input type="date" className="form-input" value={date}
+                      onChange={e => setDate(e.target.value)} style={{ maxWidth: 220 }} />
                   </div>
                 )}
 
@@ -266,6 +259,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                       <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
                         Activity
                       </div>
+                      <div style={{ width: 54, textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
+                        Count
+                      </div>
                       {LEVELS.map(l => (
                         <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
                       ))}
@@ -280,9 +276,20 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                         const curr = levels[act.id]
                         return (
                           <div key={act.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 0', borderBottom: '1px solid #F7FAFC' }}>
-                            <div style={{ flex: 1, fontSize: 12, color: '#4A5568', lineHeight: 1.4, paddingRight: 8 }}>
+                            <div style={{ flex: 1, fontSize: 12, color: '#4A5568', lineHeight: 1.4, paddingRight: 4 }}>
                               {act.name}
                             </div>
+                            <input
+                              type="number" min="0"
+                              placeholder="0"
+                              value={counts[act.id] || ''}
+                              onChange={e => setCounts(prev => ({ ...prev, [act.id]: e.target.value }))}
+                              style={{
+                                width: 54, border: '1.5px solid #E2E8F0', borderRadius: 8,
+                                padding: '4px 6px', fontSize: 12, textAlign: 'center',
+                                outline: 'none', color: '#4A5568', background: '#FAFAFA',
+                              }}
+                            />
                             {LEVELS.map(l => {
                               const isSelected = curr === l
                               return (
