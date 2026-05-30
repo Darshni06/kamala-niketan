@@ -265,8 +265,7 @@ export default function ReportsPage({ role }) {
         </div>
       )
     }
-
-
+  }  // end renderChart
 
   return (
     <div>
@@ -290,7 +289,7 @@ export default function ReportsPage({ role }) {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, marginBottom: 12 }}>
           Select Graph Type
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           {GRAPH_TYPES.map(g => (
             <button key={g.id} className={`graph-type-btn ${graphType === g.id ? 'active' : ''}`}
               onClick={() => setGraphType(g.id)}>
@@ -331,5 +330,4 @@ export default function ReportsPage({ role }) {
       </div>
     </div>
   )
-}
 }
