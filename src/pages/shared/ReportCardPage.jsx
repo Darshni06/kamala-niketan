@@ -4,6 +4,7 @@ import { db } from '../../supabase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
 import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../supabase/services'
+import { supabase } from '../../supabase/config' 
 import { CLASSES, LEVEL_COLORS, TEAL, PEACH } from '../../utils/theme'
 import { generateNarrativeWithGemini, exportReportCardHTML, exportReportCardExcel } from '../../utils/exportUtils'
 
