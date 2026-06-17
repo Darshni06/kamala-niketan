@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 //import { collection, getDocs, query, where } from 'supabase/services'
-import { db } from '../../supabase/config'
+//import { db } from '../../supabase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
 import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../supabase/services'
@@ -18,7 +18,21 @@ const weightToLevel = (avg) => {
   const clamped = Math.min(4, Math.max(1, rounded))
   return WEIGHT_LEVEL[clamped]
 }
+// ─── Fetch all progress for a student using Supabase ────────────────────────
+const getProgressForStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from('progress')
+    .select('*')
+    .eq('studentId', studentId)
 
+  if (error) {
+    console.error('Error fetching progress:', error)
+    throw error
+  }
+  return data || []
+}
+
+/*
 // ─── Fetch all progress for a student ────────────────────────────────────────
 const getProgressForStudent = async (studentId) => {
   const q    = query(collection(db, 'progress'), where('studentId', '==', studentId))
@@ -27,7 +41,7 @@ const getProgressForStudent = async (studentId) => {
 }
 
 // ─── Fetch full 4-layer curriculum for a grade ────────────────────────────────
-/*const getCurriculumForGrade = async (grade) => {
+const getCurriculumForGrade = async (grade) => {
   const subSnap = await getDocs(query(collection(db, 'subjects'), where('grade', '==', grade)))
   const subjects = subSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
