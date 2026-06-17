@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../firebase/services'
+import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../supabase/services'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner } from '../../components/UI'
 import { LEVEL_COLORS, LEVEL_FULL, CLASSES, GRADES, TEAL } from '../../utils/theme'

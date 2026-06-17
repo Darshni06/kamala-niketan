@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs, query, where } from 'firebase/firestore'
-import { db } from '../../firebase/config'
+import { collection, getDocs, query, where } from 'supabase/firestore'
+import { db } from '../../supabase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
-import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../firebase/services'
+import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../supabase/services'
 import { CLASSES, LEVEL_COLORS, TEAL, PEACH } from '../../utils/theme'
 import { generateNarrativeWithGemini, exportReportCardHTML, exportReportCardExcel } from '../../utils/exportUtils'
 
@@ -26,7 +26,7 @@ const getProgressForStudent = async (studentId) => {
 }
 
 // ─── Fetch full 4-layer curriculum for a grade ────────────────────────────────
-const getCurriculumForGrade = async (grade) => {
+/*const getCurriculumForGrade = async (grade) => {
   const subSnap = await getDocs(query(collection(db, 'subjects'), where('grade', '==', grade)))
   const subjects = subSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
@@ -46,7 +46,7 @@ const getCurriculumForGrade = async (grade) => {
   }
   return subjects
 }
-
+*/
 // ─── Compute skill progress per term ─────────────────────────────────────────
 // Returns: { skillId: { T1: { avg, level, count }, T2: ..., T3: ... } }
 const computeSkillProgress = (progressRecords, curriculum) => {

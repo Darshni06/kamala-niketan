@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { logoutUser } from '../firebase/services'
+import { logoutUser } from '../supabase/services'
 import { LEVEL_COLORS, LEVEL_FULL, LEVELS } from '../utils/theme'
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────

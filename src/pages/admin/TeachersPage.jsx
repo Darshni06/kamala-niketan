@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAllTeachers, createUser, updateUserProfile, deleteUserProfile, resetPassword } from '../../firebase/services'
+import { getAllTeachers, createUser, updateUserProfile, deleteUserProfile, resetPassword } from '../../supabase/services'
 import { PageHeader, Spinner, ConfirmDialog, SearchInput, EmptyState } from '../../components/UI'
 import { CLASSES, TEAL } from '../../utils/theme'
 

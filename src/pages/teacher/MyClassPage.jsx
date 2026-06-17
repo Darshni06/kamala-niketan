@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getStudentsByClass, getProgressByClass } from '../../firebase/services'
+import { getStudentsByClass, getProgressByClass } from '../../supabase/services'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, GradeBadge, EmptyState } from '../../components/UI'
 import ProgressModal from '../../components/ProgressModal'

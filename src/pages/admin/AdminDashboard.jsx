@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getClasses, getAllStudents, getAllTeachers, getProgressByClass } from '../../firebase/services'
+import { getClasses, getAllStudents, getAllTeachers, getProgressByClass } from '../../supabase/services'
 import { PageHeader, Spinner } from '../../components/UI'
 import { CLASSES, TEAL, PEACH } from '../../utils/theme'
 import { format } from 'date-fns'

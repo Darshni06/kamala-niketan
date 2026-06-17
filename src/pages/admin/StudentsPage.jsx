@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAllStudents, addStudent, updateStudent, deleteStudent, bulkAddStudents } from '../../firebase/services'
+import { getAllStudents, addStudent, updateStudent, deleteStudent, bulkAddStudents } from '../../supabase/services'
 import { PageHeader, Spinner, ConfirmDialog, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
 import { parseStudentExcel } from '../../utils/exportUtils'
 import { CLASSES, GRADES, TEAL } from '../../utils/theme'

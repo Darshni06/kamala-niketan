@@ -1,7 +1,7 @@
+// src/contexts/AuthContext.jsx — Supabase version
 import { createContext, useContext, useEffect, useState } from 'react'
-import { onAuthStateChanged } from 'firebase/auth'
-import { auth } from '../firebase/config'
-import { getUserProfile } from '../firebase/services'
+import { supabase } from '../supabase/client'
+import { getUserProfile } from '../supabase/services'
 
 const AuthContext = createContext(null)
 
@@ -11,18 +11,32 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser)
-        const prof = await getUserProfile(firebaseUser.uid)
+    // Get initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user)
+        const prof = await getUserProfile(session.user.id)
         setProfile(prof)
-      } else {
-        setUser(null)
-        setProfile(null)
       }
       setLoading(false)
     })
-    return unsub
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          setUser(session.user)
+          const prof = await getUserProfile(session.user.id)
+          setProfile(prof)
+        } else {
+          setUser(null)
+          setProfile(null)
+        }
+        setLoading(false)
+      }
+    )
+
+    return () => subscription.unsubscribe()
   }, [])
 
   return (
