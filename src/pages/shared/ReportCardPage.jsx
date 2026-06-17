@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
 import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../supabase/services'
-import { supabase } from '../../supabase/config' 
+import { supabase } from '../../supabase/client' 
 import { CLASSES, LEVEL_COLORS, TEAL, PEACH } from '../../utils/theme'
 import { generateNarrativeWithGemini, exportReportCardHTML, exportReportCardExcel } from '../../utils/exportUtils'
 
