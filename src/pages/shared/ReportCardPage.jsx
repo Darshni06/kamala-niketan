@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs, query, where } from 'supabase/firestore'
+import { collection, getDocs, query, where } from 'supabase/services'
 import { db } from '../../supabase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
