@@ -328,6 +328,7 @@ export const deleteActivityById = async (id) => {
 
 export const saveProgressRecord = async (data) => {
   const logDate = data.dateOfPresentation || new Date().toISOString().split('T')[0]
+  console.log('Selected date:', date)
   console.log('logDate being saved:', logDate, '| raw input:', data.dateOfPresentation)
 
   // Check if record exists for this student + activity + term

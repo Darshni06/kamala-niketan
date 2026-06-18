@@ -129,6 +129,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           practiceCount: counts[act.id] ? Number(counts[act.id]) : 0,
           loggedBy:      profile?.uid     || profile?.id || '',
           loggedByName:  profile?.name    || '',
+          dateOfPresentation: date,
         })
       }
 
