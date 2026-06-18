@@ -110,6 +110,8 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     const skill    = skills.find(s => s.id === selSkill)
 
     try {
+      console.log('date state =', date)
+
       for (const act of toSave) {
         await saveProgressRecord({
           studentId:     student.id,
