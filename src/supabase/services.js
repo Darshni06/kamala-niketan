@@ -327,10 +327,10 @@ export const deleteActivityById = async (id) => {
 // Level overwrites, practice count accumulates, dates append
 
 export const saveProgressRecord = async (data) => {
-  const today = new Date().toISOString().split('T')[0]
+  const logDate = data.dateOfPresentation || new Date().toISOString().split('T')[0]
 
   // Check if record exists for this student + activity + term
-  const { data: existing } = await supabase
+  const { data: existing } = await supabase 
     .from('progress')
     .select('id, total_practice_count, dates')
     .eq('student_id',  data.studentId)
@@ -342,7 +342,7 @@ export const saveProgressRecord = async (data) => {
     // UPDATE — level overwrites, count accumulates, date appends
     const newCount = (existing.total_practice_count || 0) + (data.practiceCount || 0)
     const existingDates = existing.dates || []
-    const newDates = existingDates.includes(today) ? existingDates : [...existingDates, today]
+    const newDates = existingDates.includes(logDate) ? existingDates : [...existingDates, logDate]
 
     const { error } = await supabase
       .from('progress')
@@ -377,7 +377,7 @@ export const saveProgressRecord = async (data) => {
         activity_name:        data.activityName    || '',
         level:                data.level,
         total_practice_count: data.practiceCount   || 0,
-        dates:                [today],
+        dates:                [logDate],
         logged_by:            data.loggedBy        || null,
         logged_by_name:       data.loggedByName    || '',
       })
