@@ -9,25 +9,37 @@ export function exportLogsToExcel(records, students, className) {
   }
 
   const rows = records.map(r => {
-    const student = students.find(s => s.id === r.studentId)
+    // Support both Supabase (snake_case) and Firebase (camelCase) field names
+    const studentId   = r.student_id   || r.studentId
+    const student     = students.find(s => s.id === studentId)
+    const levelMeaning = r.level === 'M' ? 'Making an effort'
+                       : r.level === 'A' ? 'Advancing'
+                       : r.level === 'R' ? 'Reaching milestone'
+                       : r.level === 'P' ? 'Proficient' : ''
+    // Format last updated — Supabase uses ISO string, Firebase uses Timestamp
+    let lastUpdated = ''
+    if (r.updated_at) {
+      lastUpdated = new Date(r.updated_at).toLocaleDateString('en-IN')
+    } else if (r.updatedAt?.toDate) {
+      lastUpdated = r.updatedAt.toDate().toLocaleDateString('en-IN')
+    }
+    // Dates array (new Supabase field)
+    const datesLogged = Array.isArray(r.dates) ? r.dates.join(', ') : (r.dateOfPresentation || '')
+
     return {
-      'Student Name':     student?.name       || r.studentName  || '',
-      'Grade':            student?.grade      || r.grade        || '',
-      'Subject':          r.subjectName       || '',
-      'Category':         r.categoryName      || '',
-      'Skill':            r.skillName         || '',
-      'Activity':         r.activityName      || '',
-      'Term':             r.term              || '',
-      'Level':            r.level             || '',
-      'Level Meaning':    r.level === 'M' ? 'Making an effort'
-                        : r.level === 'A' ? 'Advancing'
-                        : r.level === 'R' ? 'Reaching milestone'
-                        : r.level === 'P' ? 'Proficient' : '',
-      'Date of Presentation': r.dateOfPresentation || '',
-      'Practice Count':   r.practiceCount     != null ? r.practiceCount : '',
-      'Teacher Note':     r.note              || '',
-      'Logged By':        r.loggedByName      || '',
-      'Last Updated':     r.updatedAt?.toDate?.().toLocaleDateString('en-IN') || '',
+      'Student Name':       student?.name         || r.student_name  || r.studentName  || '',
+      'Grade':              student?.grade         || r.grade         || '',
+      'Subject':            r.subject_name         || r.subjectName   || '',
+      'Category':           r.category_name        || r.categoryName  || '',
+      'Skill':              r.skill_name           || r.skillName     || '',
+      'Activity':           r.activity_name        || r.activityName  || '',
+      'Term':               r.term                 || '',
+      'Level':              r.level                || '',
+      'Level Meaning':      levelMeaning,
+      'Dates Logged':       datesLogged,
+      'Total Practice Count': r.total_practice_count ?? r.practiceCount ?? '',
+      'Logged By':          r.logged_by_name       || r.loggedByName  || '',
+      'Last Updated':       lastUpdated,
     }
   })
 

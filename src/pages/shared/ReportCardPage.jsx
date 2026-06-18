@@ -1,83 +1,41 @@
+// src/pages/shared/ReportCardPage.jsx — Supabase version
 import { useState, useEffect } from 'react'
-//import { collection, getDocs, query, where } from 'supabase/services'
-//import { db } from '../../supabase/config'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner, SearchInput, GradeBadge, EmptyState } from '../../components/UI'
-import { getAllStudents, getStudentsByClass, getAllTeacherNotesByStudent } from '../../supabase/services'
-import { supabase } from '../../supabase/client' 
+import {
+  getAllStudents,
+  getStudentsByClass,
+  getAllTeacherNotesByStudent,
+  getProgressByStudent,
+  getCurriculumForGrade,
+} from '../../supabase/services'
 import { CLASSES, LEVEL_COLORS, TEAL, PEACH } from '../../utils/theme'
-import { generateNarrativeWithGemini, exportReportCardHTML, exportReportCardExcel } from '../../utils/exportUtils'
+import { exportReportCardHTML, exportReportCardExcel } from '../../utils/exportUtils'
 
 // ─── Level weights ────────────────────────────────────────────────────────────
 const LEVEL_WEIGHT = { M: 1, A: 2, R: 3, P: 4 }
 const WEIGHT_LEVEL = { 1: 'M', 2: 'A', 3: 'R', 4: 'P' }
 
-// Round to nearest — 3.5 and above → P (4), below → R (3)
 const weightToLevel = (avg) => {
   const rounded = Math.round(avg)
   const clamped = Math.min(4, Math.max(1, rounded))
   return WEIGHT_LEVEL[clamped]
 }
-// ─── Fetch all progress for a student using Supabase ────────────────────────
-const getProgressForStudent = async (studentId) => {
-  const { data, error } = await supabase
-    .from('progress')
-    .select('*')
-    .eq('studentId', studentId)
 
-  if (error) {
-    console.error('Error fetching progress:', error)
-    throw error
-  }
-  return data || []
-}
-
-/*
-// ─── Fetch all progress for a student ────────────────────────────────────────
-const getProgressForStudent = async (studentId) => {
-  const q    = query(collection(db, 'progress'), where('studentId', '==', studentId))
-  const snap = await getDocs(q)
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
-}
-
-// ─── Fetch full 4-layer curriculum for a grade ────────────────────────────────
-const getCurriculumForGrade = async (grade) => {
-  const subSnap = await getDocs(query(collection(db, 'subjects'), where('grade', '==', grade)))
-  const subjects = subSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-
-  for (const sub of subjects) {
-    const catSnap = await getDocs(collection(db, 'subjects', sub.id, 'categories'))
-    sub.categories = catSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-
-    for (const cat of sub.categories) {
-      const skillSnap = await getDocs(collection(db, 'subjects', sub.id, 'categories', cat.id, 'skills'))
-      cat.skills = skillSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-
-      for (const skill of cat.skills) {
-        const actSnap = await getDocs(collection(db, 'subjects', sub.id, 'categories', cat.id, 'skills', skill.id, 'activities'))
-        skill.activities = actSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      }
-    }
-  }
-  return subjects
-}
-*/
-// ─── Compute skill progress per term ─────────────────────────────────────────
+// ─── Compute skill progress per term from raw progress records ────────────────
 // Returns: { skillId: { T1: { avg, level, count }, T2: ..., T3: ... } }
 const computeSkillProgress = (progressRecords, curriculum) => {
   const result = {}
-
   for (const subject of curriculum) {
-    for (const cat of subject.categories) {
-      for (const skill of cat.skills) {
+    for (const cat of (subject.categories || [])) {
+      for (const skill of (cat.skills || [])) {
         result[skill.id] = {}
         for (const term of ['T1', 'T2', 'T3']) {
-          // Get all activity records for this skill + term
           const termRecs = progressRecords.filter(r =>
-            r.skillId === skill.id && r.term === term && LEVEL_WEIGHT[r.level]
+            r.skill_id === skill.id && r.term === term && LEVEL_WEIGHT[r.level]
           )
           if (termRecs.length === 0) {
-            result[skill.id][term] = null // no data this term
+            result[skill.id][term] = null
           } else {
             const weights = termRecs.map(r => LEVEL_WEIGHT[r.level])
             const avg     = weights.reduce((s, w) => s + w, 0) / weights.length
@@ -94,7 +52,7 @@ const computeSkillProgress = (progressRecords, curriculum) => {
   return result
 }
 
-// ─── AI narrative stubs (Gemini) ──────────────────────────────────────────────
+// ─── Gemini AI narrative ──────────────────────────────────────────────────────
 const generateNarrative = async (subjectName, skills, skillProgress, teacherNotes, studentName) => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
   if (!apiKey) return null
@@ -108,7 +66,7 @@ const generateNarrative = async (subjectName, skills, skillProgress, teacherNote
   }).join('\n')
 
   const note = teacherNotes
-    .filter(n => n.subjectId && n.subjectName === subjectName)
+    .filter(n => n.subject_name === subjectName || n.subjectName === subjectName)
     .map(n => n.note).join(' ')
 
   const prompt = `You are writing a Montessori school report card for ${studentName}.
@@ -141,19 +99,19 @@ Use the student's name. Do not mention level codes. No heading — just the para
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-
 export default function ReportCardPage({ role }) {
   const { profile } = useAuth()
+
   const [mode,       setMode]       = useState('student')
   const [selClass,   setSelClass]   = useState('')
   const [students,   setStudents]   = useState([])
   const [search,     setSearch]     = useState('')
   const [selected,   setSelected]   = useState(null)
   const [curriculum, setCurriculum] = useState([])
-  const [progress,   setProgress]   = useState([])   // raw records
-  const [skillProg,  setSkillProg]  = useState({})   // computed per skill per term
+  const [progress,   setProgress]   = useState([])
+  const [skillProg,  setSkillProg]  = useState({})
   const [notes,      setNotes]      = useState([])
-  const [narratives, setNarratives] = useState({})   // subjectId → text
+  const [narratives, setNarratives] = useState({})
   const [generating, setGenerating] = useState(false)
   const [generated,  setGenerated]  = useState(false)
   const [genPct,     setGenPct]     = useState(0)
@@ -166,10 +124,10 @@ export default function ReportCardPage({ role }) {
       setLoading(true)
       try {
         const list = role === 'teacher'
-          ? await getStudentsByClass(profile?.classId)
+          ? await getStudentsByClass(profile?.classId || profile?.class_id)
           : await getAllStudents()
         setStudents(list)
-      } catch (e) { setError('Failed to load students.') }
+      } catch (e) { setError('Failed to load students: ' + e.message) }
       finally { setLoading(false) }
     }
     load()
@@ -179,10 +137,11 @@ export default function ReportCardPage({ role }) {
   useEffect(() => {
     if (!selected) return
     const load = async () => {
+      setError('')
       try {
         const [curric, recs, notesList] = await Promise.all([
           getCurriculumForGrade(selected.grade),
-          getProgressForStudent(selected.id),
+          getProgressByStudent(selected.id),
           getAllTeacherNotesByStudent(selected.id),
         ])
         setCurriculum(curric)
@@ -206,12 +165,16 @@ export default function ReportCardPage({ role }) {
     setGenerating(true); setGenerated(false); setNarratives({}); setGenPct(0); setError('')
 
     for (let i = 0; i < curriculum.length; i++) {
-      const subject = curriculum[i]
-      const allSkills = subject.categories.flatMap(c => c.skills)
+      const subject   = curriculum[i]
+      const allSkills = (subject.categories || []).flatMap(c => c.skills || [])
       const narrative = await generateNarrative(
         subject.name, allSkills, skillProg, notes, selected.name
       )
-      setNarratives(prev => ({ ...prev, [subject.id]: narrative || `${selected.name} has been working on ${subject.name} activities and continues to make good progress.` }))
+      setNarratives(prev => ({
+        ...prev,
+        [subject.id]: narrative ||
+          `${selected.name} has been working on ${subject.name} activities and continues to make good progress.`
+      }))
       setGenPct(Math.round(((i + 1) / curriculum.length) * 100))
     }
 
@@ -220,30 +183,25 @@ export default function ReportCardPage({ role }) {
   }
 
   // ── Download ──────────────────────────────────────────────────────────────
-  const handleDownload = () => {
+  const handleDownloadHTML = () => {
     if (!selected) return
-    // Build simplified areas array for exportReportCardHTML
     const areas = curriculum.map(sub => ({
       id:   sub.id,
       name: sub.name,
-      subAreas: sub.categories.map(cat => ({
-        name: cat.name,
-        skills: cat.skills.map(skill => ({
-          id:   skill.id,
-          name: skill.name,
-        }))
+      subAreas: (sub.categories || []).map(cat => ({
+        name:   cat.name,
+        skills: (cat.skills || []).map(sk => ({ id: sk.id, name: sk.name }))
       }))
     }))
-    // Build progressMap in format expected by export: skillId → { T1: { level }, T2, T3 }
     const progMap = {}
     Object.entries(skillProg).forEach(([skillId, terms]) => {
       progMap[skillId] = {}
       Object.entries(terms).forEach(([t, val]) => {
-        if (val) progMap[skillId][t] = { level: val.level }
+        if (val) progMap[skillId][t] = { level: val.level, avg: val.avg }
       })
     })
     exportReportCardHTML(
-      { ...selected, className: profile?.classId || '' },
+      { ...selected, classId: selected.classId || selected.class_id },
       areas, progMap, narratives, null
     )
   }
@@ -252,9 +210,9 @@ export default function ReportCardPage({ role }) {
     if (!selected) return
     const areas = curriculum.map(sub => ({
       name: sub.name,
-      subAreas: sub.categories.map(cat => ({
+      subAreas: (sub.categories || []).map(cat => ({
         name:   cat.name,
-        skills: cat.skills.map(s => ({ id: s.id, name: s.name }))
+        skills: (cat.skills || []).map(s => ({ id: s.id, name: s.name }))
       }))
     }))
     const progMap = {}
@@ -267,7 +225,7 @@ export default function ReportCardPage({ role }) {
     exportReportCardExcel(selected, areas, progMap)
   }
 
-  // ── Report preview ────────────────────────────────────────────────────────
+  // ── Preview ───────────────────────────────────────────────────────────────
   const renderPreview = () => {
     if (!selected) return (
       <EmptyState icon="📄" message="Select a student to preview their report card" />
@@ -289,7 +247,7 @@ export default function ReportCardPage({ role }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 16, fontSize: 12 }}>
           <div><b>Name:</b> {selected.name}</div>
           <div><b>Grade:</b> {selected.grade}</div>
-          <div><b>Class:</b> {selected.classId}</div>
+          <div><b>Class:</b> {selected.classId || selected.class_id}</div>
           <div><b>Principal:</b> Mrs. Mala Sivakumar</div>
         </div>
 
@@ -310,28 +268,31 @@ export default function ReportCardPage({ role }) {
         </div>
 
         {/* Subjects */}
-        {curriculum.map(subject => (
-          <div key={subject.id} style={{ marginBottom: 20 }}>
-            <div className="rc-section-header">{subject.name}</div>
-            <div className="rc-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: '52%' }}>Skill</th>
-                    <th style={{ textAlign: 'center', width: '16%' }}>Term 1</th>
-                    <th style={{ textAlign: 'center', width: '16%' }}>Term 2</th>
-                    <th style={{ textAlign: 'center', width: '16%' }}>Term 3</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {subject.categories.flatMap(cat =>
-                    cat.skills.map(skill => {
+        {curriculum.map(subject => {
+          const allSkills = (subject.categories || []).flatMap(cat =>
+            (cat.skills || []).map(sk => ({ ...sk }))
+          )
+          return (
+            <div key={subject.id} style={{ marginBottom: 20 }}>
+              <div className="rc-section-header">{subject.name}</div>
+              <div className="rc-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '52%' }}>Skill</th>
+                      <th style={{ textAlign: 'center', width: '16%' }}>Term 1</th>
+                      <th style={{ textAlign: 'center', width: '16%' }}>Term 2</th>
+                      <th style={{ textAlign: 'center', width: '16%' }}>Term 3</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allSkills.map(skill => {
                       const sp = skillProg[skill.id] || {}
                       const cell = (t) => {
                         const d = sp[t]
                         if (!d) return <span style={{ color: '#CBD5E0' }}>—</span>
                         return (
-                          <span title={`avg ${d.avg}/4 (${d.count} activities)`}
+                          <span title={`avg ${d.avg}/4 · ${d.count} activities`}
                             style={{ fontWeight: 800, color: LEVEL_COLORS[d.level], cursor: 'help' }}>
                             {d.level}
                           </span>
@@ -345,37 +306,37 @@ export default function ReportCardPage({ role }) {
                           <td style={{ textAlign: 'center' }}>{cell('T3')}</td>
                         </tr>
                       )
-                    })
-                  )}
-                </tbody>
-              </table>
+                    })}
+                  </tbody>
+                </table>
 
-              {/* AI narrative */}
-              {narratives[subject.id] ? (
-                <div style={{ fontSize: 11, color: '#4A5568', padding: '10px 12px', background: 'rgba(59,191,178,.04)', lineHeight: 1.7, borderTop: '1px solid #EDF2F7' }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: TEAL, textTransform: 'uppercase', letterSpacing: .8 }}>🤖 AI Narrative · </span>
-                  {narratives[subject.id]}
-                </div>
-              ) : generating ? (
-                <div style={{ padding: '10px 12px', borderTop: '1px solid #EDF2F7' }}>
-                  <div className="ai-streaming" style={{ width: '95%' }} />
-                  <div className="ai-streaming" style={{ width: '78%' }} />
-                  <div className="ai-streaming" style={{ width: '55%' }} />
-                </div>
-              ) : (
-                <div style={{ fontSize: 10, color: '#CBD5E0', fontStyle: 'italic', padding: '7px 12px', borderTop: '1px solid #EDF2F7' }}>
-                  Narrative will appear after generation
-                </div>
-              )}
+                {/* AI narrative */}
+                {narratives[subject.id] ? (
+                  <div style={{ fontSize: 11, color: '#4A5568', padding: '10px 12px', background: 'rgba(59,191,178,.04)', lineHeight: 1.7, borderTop: '1px solid #EDF2F7' }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: TEAL, textTransform: 'uppercase', letterSpacing: .8 }}>🤖 AI Narrative · </span>
+                    {narratives[subject.id]}
+                  </div>
+                ) : generating ? (
+                  <div style={{ padding: '10px 12px', borderTop: '1px solid #EDF2F7' }}>
+                    <div className="ai-streaming" style={{ width: '95%' }} />
+                    <div className="ai-streaming" style={{ width: '78%' }} />
+                    <div className="ai-streaming" style={{ width: '55%' }} />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10, color: '#CBD5E0', fontStyle: 'italic', padding: '7px 12px', borderTop: '1px solid #EDF2F7' }}>
+                    Narrative will appear after generation
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         {/* Legend */}
         {generated && (
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: '2px solid #EDF2F7', fontSize: 11, color: '#718096', lineHeight: 1.8 }}>
             <b>Level of Achievement</b> — <b>P</b> Proficient (4) · <b>R</b> Reaching milestone (3) · <b>A</b> Advancing (2) · <b>M</b> Making an effort (1)<br />
-            <b>Formula:</b> Each skill level = average of all activity levels logged for that skill (rounded to nearest level) · <b>—</b> Not yet recorded
+            <b>Formula:</b> Skill level = average of all activity levels for that skill per term, rounded to nearest · <b>—</b> Not yet recorded
           </div>
         )}
       </div>
@@ -424,7 +385,8 @@ export default function ReportCardPage({ role }) {
                         border: `1.5px solid ${selClass === c ? TEAL : '#E2E8F0'}`,
                         background: selClass === c ? 'rgba(59,191,178,.1)' : 'white',
                         color: selClass === c ? TEAL : '#2D3748', transition: 'all .18s',
-                      }}>{c}</div>
+                      }}>{c}
+                    </div>
                   ))}
                 </div>
               </>
@@ -439,6 +401,9 @@ export default function ReportCardPage({ role }) {
                 </div>
                 {loading ? <Spinner center /> : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 360, overflowY: 'auto' }}>
+                    {filtered.length === 0 && (
+                      <div style={{ fontSize: 12, color: '#A0AEC0', textAlign: 'center', padding: 16 }}>No students found.</div>
+                    )}
                     {filtered.map(s => (
                       <div key={s.id}
                         onClick={() => { setSelected(s); setGenerated(false); setNarratives({}) }}
@@ -466,7 +431,7 @@ export default function ReportCardPage({ role }) {
             )}
           </div>
 
-          {/* Generate + download buttons */}
+          {/* Generate + download */}
           {(selected || selClass) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button className="btn-primary" style={{ width: '100%' }}
@@ -481,7 +446,7 @@ export default function ReportCardPage({ role }) {
               {generated && (
                 <>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn-peach" style={{ flex: 1, fontSize: 13 }} onClick={handleDownload}>
+                    <button className="btn-peach" style={{ flex: 1, fontSize: 13 }} onClick={handleDownloadHTML}>
                       📥 Download (.html)
                     </button>
                     <button className="btn-ghost" style={{ flex: 1, fontSize: 13 }} onClick={handleDownloadExcel}>
@@ -497,7 +462,7 @@ export default function ReportCardPage({ role }) {
           )}
         </div>
 
-        {/* Right — preview */}
+        {/* Right preview */}
         <div className="glass" style={{ borderRadius: 16, padding: 28, minHeight: 400 }}>
           {renderPreview()}
         </div>

@@ -1,3 +1,4 @@
+// src/pages/teacher/MyClassPage.jsx — Supabase version
 import { useState, useEffect } from 'react'
 import { getStudentsByClass, getProgressByClass } from '../../supabase/services'
 import { useAuth } from '../../contexts/AuthContext'
@@ -8,14 +9,14 @@ import { GRADES, TEAL, PEACH } from '../../utils/theme'
 
 export default function MyClassPage() {
   const { profile } = useAuth()
-  const [students,  setStudents]  = useState([])
-  const [records,   setRecords]   = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [modal,     setModal]     = useState(null)
-  const [section,   setSection]   = useState('All')
-  const [error,     setError]     = useState('')
+  const [students, setStudents] = useState([])
+  const [records,  setRecords]  = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [modal,    setModal]    = useState(null)
+  const [section,  setSection]  = useState('All')
+  const [error,    setError]    = useState('')
 
-  const classId = profile?.classId
+  const classId = profile?.classId || profile?.class_id
 
   const load = async () => {
     setLoading(true)
@@ -40,28 +41,27 @@ export default function MyClassPage() {
     UKG:   students.filter(s => s.grade === 'UKG'),
   }
 
-  const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  })
-
+  const today    = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const todayStr = new Date().toISOString().split('T')[0]
+
+  // Check if logged today — Supabase updated_at is ISO string
   const loggedTodayIds = new Set(
     records
       .filter(r => {
-        const d = r.updatedAt?.toDate?.()
+        const d = r.updated_at ? new Date(r.updated_at) : null
         return d && d.toISOString().split('T')[0] === todayStr
       })
-      .map(r => r.studentId)
+      .map(r => r.student_id || r.studentId)
   )
 
   const formatLastLogged = (studentId) => {
     if (loggedTodayIds.has(studentId)) return 'today'
-    const recs = records.filter(r => r.studentId === studentId)
+    const recs = records.filter(r => (r.student_id || r.studentId) === studentId)
     if (!recs.length) return null
     const latest = recs.sort((a, b) =>
-      (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)
+      new Date(b.updated_at || 0) - new Date(a.updated_at || 0)
     )[0]
-    const d = latest?.updatedAt?.toDate?.()
+    const d = latest?.updated_at ? new Date(latest.updated_at) : null
     if (!d) return null
     const days = Math.floor((new Date() - d) / 86400000)
     if (days === 1) return 'yesterday'
@@ -90,11 +90,8 @@ export default function MyClassPage() {
 
       {error && <div className="error-box" style={{ marginBottom: 16 }}>{error}</div>}
 
-      {/* Today summary strip */}
-      <div className="glass" style={{
-        borderRadius: 12, padding: '12px 20px', marginBottom: 24,
-        display: 'flex', gap: 24, alignItems: 'center',
-      }}>
+      {/* Today summary */}
+      <div className="glass" style={{ borderRadius: 12, padding: '12px 20px', marginBottom: 24, display: 'flex', gap: 24, alignItems: 'center' }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 700, color: TEAL }}>{loggedTodayIds.size}</div>
           <div style={{ fontSize: 12, color: '#718096' }}>Logged today</div>
@@ -108,7 +105,7 @@ export default function MyClassPage() {
         <div style={{ flex: 1 }}>
           <div className="progress-bar-bg">
             <div className="progress-bar-fill" style={{
-              width: `${students.length ? (loggedTodayIds.size / students.length) * 100 : 0}%`,
+              width: `${students.length ? (loggedTodayIds.size / students.length) * 100 : 0}%`
             }} />
           </div>
           <div style={{ fontSize: 11, color: '#A0AEC0', marginTop: 4 }}>
@@ -137,11 +134,10 @@ export default function MyClassPage() {
                 <div style={{ flex: 1, height: 1, background: '#EDF2F7' }} />
                 <span style={{ fontSize: 12, color: '#A0AEC0' }}>{list.length} students</span>
               </div>
-
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
                 {list.map(s => {
-                  const lastLogged = formatLastLogged(s.id)
                   const isToday    = loggedTodayIds.has(s.id)
+                  const lastLogged = formatLastLogged(s.id)
                   return (
                     <div key={s.id} className="glass student-card" onClick={() => setModal(s)}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
@@ -166,9 +162,7 @@ export default function MyClassPage() {
                           : <span style={{ color: '#E8876A' }}>Not yet logged</span>
                         }
                       </div>
-                      <button
-                        className="btn-primary"
-                        style={{ width: '100%', padding: '7px', fontSize: 12 }}
+                      <button className="btn-primary" style={{ width: '100%', padding: '7px', fontSize: 12 }}
                         onClick={e => { e.stopPropagation(); setModal(s) }}>
                         Log Progress
                       </button>
