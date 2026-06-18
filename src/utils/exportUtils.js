@@ -24,7 +24,15 @@ export function exportLogsToExcel(records, students, className) {
       lastUpdated = r.updatedAt.toDate().toLocaleDateString('en-IN')
     }
     // Dates array (new Supabase field)
-    const datesLogged = Array.isArray(r.dates) ? r.dates.join(', ') : (r.dateOfPresentation || '')
+    const datesLogged = Array.isArray(r.dates)
+      ? r.dates
+          .sort()
+          .map(d => {
+            const dt = new Date(d)
+            return isNaN(dt) ? d : dt.toLocaleDateString('en-IN')
+          })
+          .join(', ')
+      : (r.dateOfPresentation || '')
 
     return {
       'Student Name':       student?.name         || r.student_name  || r.studentName  || '',
