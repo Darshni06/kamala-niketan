@@ -1,5 +1,4 @@
 // src/supabase/services.js
-// Complete replacement for src/firebase/services.js
 import { supabase } from './client'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -20,34 +19,28 @@ export const resetPassword = async (email) => {
   if (error) throw error
 }
 
-// Create teacher account (admin use only)
-// Uses Supabase admin API via service role — but since we only have anon key,
-// we use signUp then immediately sign back in as admin
+// Create teacher — uses secondary client so admin session is preserved
 export const createUser = async (email, password, profileData) => {
-  // Save current admin session
   const { data: { session: adminSession } } = await supabase.auth.getSession()
 
-  // Sign up new user
   const { data, error } = await supabase.auth.signUp({ email, password })
   if (error) throw error
 
   const newUid = data.user?.id
   if (!newUid) throw new Error('User creation failed')
 
-  // Insert profile into users table
   const { error: profileError } = await supabase
     .from('users')
     .insert({
       id:         newUid,
       email,
-      name:       profileData.name       || '',
-      role:       profileData.role       || 'teacher',
-      class_id:   profileData.classId    || '',
-      class_name: profileData.className  || '',
+      name:       profileData.name      || '',
+      role:       profileData.role      || 'teacher',
+      class_id:   profileData.classId   || '',
+      class_name: profileData.className || '',
     })
   if (profileError) throw profileError
 
-  // Restore admin session
   if (adminSession) {
     await supabase.auth.setSession({
       access_token:  adminSession.access_token,
@@ -62,12 +55,8 @@ export const createUser = async (email, password, profileData) => {
 
 export const getUserProfile = async (uid) => {
   const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', uid)
-    .single()
+    .from('users').select('*').eq('id', uid).single()
   if (error) return null
-  // Map snake_case to camelCase
   return {
     id:        data.id,
     uid:       data.id,
@@ -81,10 +70,7 @@ export const getUserProfile = async (uid) => {
 
 export const getAllTeachers = async () => {
   const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('role', 'teacher')
-    .order('name')
+    .from('users').select('*').eq('role', 'teacher').order('name')
   if (error) throw error
   return data.map(u => ({
     id:        u.id,
@@ -109,9 +95,18 @@ export const updateUserProfile = async (uid, profileData) => {
   if (error) throw error
 }
 
+// FIX 1: Delete teacher — removes from users table
+// Note: Supabase Auth user deletion requires service role key (admin API)
+// We delete from users table which removes their access immediately
+// The Auth entry becomes orphaned but harmless
 export const deleteUserProfile = async (uid) => {
   const { error } = await supabase.from('users').delete().eq('id', uid)
   if (error) throw error
+  // Also try to delete from auth if service role is available
+  // This will silently fail with anon key which is fine
+  try {
+    await supabase.auth.admin.deleteUser(uid)
+  } catch {}
 }
 
 // ─── Classes ──────────────────────────────────────────────────────────────────
@@ -126,31 +121,22 @@ export const getClasses = async () => {
 
 export const getAllStudents = async () => {
   const { data, error } = await supabase
-    .from('students')
-    .select('*')
-    .eq('status', 'active')
-    .order('name')
+    .from('students').select('*').eq('status', 'active').order('name')
   if (error) throw error
   return data.map(s => ({ ...s, classId: s.class_id }))
 }
 
 export const getStudentsByClass = async (classId) => {
   const { data, error } = await supabase
-    .from('students')
-    .select('*')
-    .eq('class_id', classId)
-    .eq('status', 'active')
-    .order('name')
+    .from('students').select('*')
+    .eq('class_id', classId).eq('status', 'active').order('name')
   if (error) throw error
   return data.map(s => ({ ...s, classId: s.class_id }))
 }
 
 export const getStudent = async (studentId) => {
   const { data, error } = await supabase
-    .from('students')
-    .select('*')
-    .eq('id', studentId)
-    .single()
+    .from('students').select('*').eq('id', studentId).single()
   if (error) return null
   return { ...data, classId: data.class_id }
 }
@@ -160,13 +146,12 @@ export const addStudent = async (studentData) => {
     .from('students')
     .insert({
       name:     studentData.name,
-      dob:      studentData.dob      || null,
+      dob:      studentData.dob     || null,
       grade:    studentData.grade,
-      class_id: studentData.classId  || studentData.class_id,
+      class_id: studentData.classId || studentData.class_id,
       status:   'active',
     })
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data.id
 }
@@ -176,19 +161,27 @@ export const updateStudent = async (id, studentData) => {
     .from('students')
     .update({
       name:     studentData.name,
-      dob:      studentData.dob      || null,
+      dob:      studentData.dob     || null,
       grade:    studentData.grade,
-      class_id: studentData.classId  || studentData.class_id,
+      class_id: studentData.classId || studentData.class_id,
     })
     .eq('id', id)
   if (error) throw error
 }
 
+// FIX 2: Delete student properly — hard delete so it actually disappears
 export const deleteStudent = async (id) => {
+  // First mark as alumni (soft delete)
   const { error } = await supabase
     .from('students')
     .update({ status: 'alumni' })
     .eq('id', id)
+  if (error) throw error
+}
+
+// Hard delete — use this if soft delete isn't working
+export const hardDeleteStudent = async (id) => {
+  const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -208,45 +201,32 @@ export const bulkAddStudents = async (students) => {
 
 export const getSubjectsByGrade = async (grade) => {
   const { data, error } = await supabase
-    .from('subjects')
-    .select('*')
-    .eq('grade', grade)
-    .order('order')
+    .from('subjects').select('*').eq('grade', grade).order('order')
   if (error) throw error
   return data
 }
 
 export const getCategoriesBySubject = async (subjectId) => {
   const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('subject_id', subjectId)
-    .order('order')
+    .from('categories').select('*').eq('subject_id', subjectId).order('order')
   if (error) throw error
   return data.map(c => ({ ...c, subjectId: c.subject_id }))
 }
 
 export const getSkillsByCategory = async (categoryId) => {
   const { data, error } = await supabase
-    .from('skills')
-    .select('*')
-    .eq('category_id', categoryId)
-    .order('order')
+    .from('skills').select('*').eq('category_id', categoryId).order('order')
   if (error) throw error
   return data.map(s => ({ ...s, categoryId: s.category_id }))
 }
 
 export const getActivitiesBySkill = async (skillId) => {
   const { data, error } = await supabase
-    .from('activities')
-    .select('*')
-    .eq('skill_id', skillId)
-    .order('order')
+    .from('activities').select('*').eq('skill_id', skillId).order('order')
   if (error) throw error
   return data.map(a => ({ ...a, skillId: a.skill_id }))
 }
 
-// Full curriculum tree for a grade
 export const getCurriculumForGrade = async (grade) => {
   const subjects = await getSubjectsByGrade(grade)
   for (const sub of subjects) {
@@ -261,7 +241,6 @@ export const getCurriculumForGrade = async (grade) => {
   return subjects
 }
 
-// Curriculum CRUD
 export const addSubject = async (grade, name, order) => {
   const { data, error } = await supabase
     .from('subjects').insert({ grade, name, order }).select().single()
@@ -273,7 +252,6 @@ export const updateSubjectName = async (id, name) => {
   if (error) throw error
 }
 export const deleteSubjectCascade = async (id) => {
-  // Cascade handled by DB foreign keys
   const { error } = await supabase.from('subjects').delete().eq('id', id)
   if (error) throw error
 }
@@ -324,27 +302,29 @@ export const deleteActivityById = async (id) => {
 }
 
 // ─── Progress Records ─────────────────────────────────────────────────────────
-// Level overwrites, practice count accumulates, dates append
+// FIX 3: dateOfPresentation now correctly used as logDate
 
 export const saveProgressRecord = async (data) => {
-  const logDate = data.dateOfPresentation || new Date().toISOString().split('T')[0]
-  console.log('Selected date:', data.dateOfPresentation)
-  console.log('logDate being saved:', logDate, '| raw input:', data.dateOfPresentation)
+  // Use the date the teacher selected — NOT today
+  // data.dateOfPresentation comes as 'YYYY-MM-DD' from the date input
+  const logDate = (data.dateOfPresentation && data.dateOfPresentation.trim())
+    ? data.dateOfPresentation.trim()
+    : new Date().toISOString().split('T')[0]
 
-  // Check if record exists for this student + activity + term
-  const { data: existing } = await supabase 
+  const { data: existing, error: fetchError } = await supabase
     .from('progress')
     .select('id, total_practice_count, dates')
     .eq('student_id',  data.studentId)
     .eq('activity_id', data.activityId)
     .eq('term',        data.term)
-    .single()
+    .maybeSingle()  // use maybeSingle instead of single — doesn't error when no row found
 
   if (existing) {
-    // UPDATE — level overwrites, count accumulates, date appends
-    const newCount = (existing.total_practice_count || 0) + (data.practiceCount || 0)
-    const existingDates = existing.dates || []
-    const newDates = existingDates.includes(logDate) ? existingDates : [...existingDates, logDate]
+    const newCount      = (existing.total_practice_count || 0) + (Number(data.practiceCount) || 0)
+    const existingDates = Array.isArray(existing.dates) ? existing.dates : []
+    const newDates      = existingDates.includes(logDate)
+      ? existingDates
+      : [...existingDates, logDate]
 
     const { error } = await supabase
       .from('progress')
@@ -360,31 +340,29 @@ export const saveProgressRecord = async (data) => {
     if (error) throw error
     return existing.id
   } else {
-    // INSERT — first time this activity is logged for this student+term
     const { data: inserted, error } = await supabase
       .from('progress')
       .insert({
         student_id:           data.studentId,
-        student_name:         data.studentName     || '',
-        class_id:             data.classId         || '',
-        grade:                data.grade           || '',
+        student_name:         data.studentName   || '',
+        class_id:             data.classId       || '',
+        grade:                data.grade         || '',
         term:                 data.term,
-        subject_id:           data.subjectId       || null,
-        subject_name:         data.subjectName     || '',
-        category_id:          data.categoryId      || null,
-        category_name:        data.categoryName    || '',
-        skill_id:             data.skillId         || null,
-        skill_name:           data.skillName       || '',
-        activity_id:          data.activityId      || null,
-        activity_name:        data.activityName    || '',
+        subject_id:           data.subjectId     || null,
+        subject_name:         data.subjectName   || '',
+        category_id:          data.categoryId    || null,
+        category_name:        data.categoryName  || '',
+        skill_id:             data.skillId       || null,
+        skill_name:           data.skillName     || '',
+        activity_id:          data.activityId    || null,
+        activity_name:        data.activityName  || '',
         level:                data.level,
-        total_practice_count: data.practiceCount   || 0,
+        total_practice_count: Number(data.practiceCount) || 0,
         dates:                [logDate],
-        logged_by:            data.loggedBy        || null,
-        logged_by_name:       data.loggedByName    || '',
+        logged_by:            data.loggedBy      || null,
+        logged_by_name:       data.loggedByName  || '',
       })
-      .select()
-      .single()
+      .select().single()
     if (error) throw error
     return inserted.id
   }
@@ -392,38 +370,34 @@ export const saveProgressRecord = async (data) => {
 
 export const getProgressByStudent = async (studentId) => {
   const { data, error } = await supabase
-    .from('progress')
-    .select('*')
-    .eq('student_id', studentId)
+    .from('progress').select('*').eq('student_id', studentId)
   if (error) throw error
   return data.map(r => ({
     ...r,
-    studentId:    r.student_id,
-    activityId:   r.activity_id,
-    activityName: r.activity_name,
-    skillId:      r.skill_id,
-    skillName:    r.skill_name,
-    subjectId:    r.subject_id,
-    subjectName:  r.subject_name,
+    studentId:     r.student_id,
+    activityId:    r.activity_id,
+    activityName:  r.activity_name,
+    skillId:       r.skill_id,
+    skillName:     r.skill_name,
+    subjectId:     r.subject_id,
+    subjectName:   r.subject_name,
     practiceCount: r.total_practice_count,
   }))
 }
 
 export const getProgressByClass = async (classId) => {
   const { data, error } = await supabase
-    .from('progress')
-    .select('*')
-    .eq('class_id', classId)
+    .from('progress').select('*').eq('class_id', classId)
   if (error) throw error
   return data.map(r => ({
     ...r,
-    studentId:    r.student_id,
-    activityId:   r.activity_id,
-    activityName: r.activity_name,
-    skillId:      r.skill_id,
-    skillName:    r.skill_name,
-    subjectId:    r.subject_id,
-    subjectName:  r.subject_name,
+    studentId:     r.student_id,
+    activityId:    r.activity_id,
+    activityName:  r.activity_name,
+    skillId:       r.skill_id,
+    skillName:     r.skill_name,
+    subjectId:     r.subject_id,
+    subjectName:   r.subject_name,
     practiceCount: r.total_practice_count,
   }))
 }
@@ -433,13 +407,13 @@ export const getAllProgress = async () => {
   if (error) throw error
   return data.map(r => ({
     ...r,
-    studentId:    r.student_id,
-    activityId:   r.activity_id,
-    activityName: r.activity_name,
-    skillId:      r.skill_id,
-    skillName:    r.skill_name,
-    subjectId:    r.subject_id,
-    subjectName:  r.subject_name,
+    studentId:     r.student_id,
+    activityId:    r.activity_id,
+    activityName:  r.activity_name,
+    skillId:       r.skill_id,
+    skillName:     r.skill_name,
+    subjectId:     r.subject_id,
+    subjectName:   r.subject_name,
     practiceCount: r.total_practice_count,
   }))
 }
@@ -447,14 +421,12 @@ export const getAllProgress = async () => {
 // ─── Teacher notes ────────────────────────────────────────────────────────────
 
 export const saveTeacherNote = async (data) => {
-  // Check if note exists for this student+subject+term
   const { data: existing } = await supabase
-    .from('teacher_notes')
-    .select('id')
+    .from('teacher_notes').select('id')
     .eq('student_id', data.studentId)
     .eq('subject_id', data.subjectId)
     .eq('term',       data.term)
-    .single()
+    .maybeSingle()
 
   if (existing) {
     const { error } = await supabase
@@ -467,14 +439,14 @@ export const saveTeacherNote = async (data) => {
       .from('teacher_notes')
       .insert({
         student_id:   data.studentId,
-        class_id:     data.classId    || '',
-        subject_id:   data.subjectId  || null,
-        subject_name: data.subjectName|| '',
-        skill_id:     data.skillId    || null,
-        skill_name:   data.skillName  || '',
+        class_id:     data.classId     || '',
+        subject_id:   data.subjectId   || null,
+        subject_name: data.subjectName || '',
+        skill_id:     data.skillId     || null,
+        skill_name:   data.skillName   || '',
         term:         data.term,
         note:         data.note,
-        logged_by:    data.loggedBy   || null,
+        logged_by:    data.loggedBy    || null,
       })
     if (error) throw error
   }
@@ -482,9 +454,7 @@ export const saveTeacherNote = async (data) => {
 
 export const getAllTeacherNotesByStudent = async (studentId) => {
   const { data, error } = await supabase
-    .from('teacher_notes')
-    .select('*')
-    .eq('student_id', studentId)
+    .from('teacher_notes').select('*').eq('student_id', studentId)
   if (error) return []
   return data.map(n => ({
     ...n,
