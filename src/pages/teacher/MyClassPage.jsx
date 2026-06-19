@@ -45,11 +45,14 @@ export default function MyClassPage() {
   const todayStr = new Date().toISOString().split('T')[0]
 
   // Check if logged today — Supabase updated_at is ISO string
+  // Safety: only count students that actually exist in the current class list
+  const validStudentIds = new Set(students.map(s => s.id))
   const loggedTodayIds = new Set(
     records
       .filter(r => {
-        const d = r.updated_at ? new Date(r.updated_at) : null
-        return d && d.toISOString().split('T')[0] === todayStr
+        const d  = r.updated_at ? new Date(r.updated_at) : null
+        const sid = r.student_id || r.studentId
+        return d && d.toISOString().split('T')[0] === todayStr && validStudentIds.has(sid)
       })
       .map(r => r.student_id || r.studentId)
   )
@@ -98,18 +101,18 @@ export default function MyClassPage() {
         </div>
         <div style={{ width: 1, height: 36, background: '#EDF2F7' }} />
         <div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#2D3748' }}>{students.length - loggedTodayIds.size}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#2D3748' }}>{Math.max(0, students.length - loggedTodayIds.size)}</div>
           <div style={{ fontSize: 12, color: '#718096' }}>Remaining</div>
         </div>
         <div style={{ width: 1, height: 36, background: '#EDF2F7' }} />
         <div style={{ flex: 1 }}>
           <div className="progress-bar-bg">
             <div className="progress-bar-fill" style={{
-              width: `${students.length ? (loggedTodayIds.size / students.length) * 100 : 0}%`
+              width: `${students.length ? Math.min(100, (loggedTodayIds.size / students.length) * 100) : 0}%`
             }} />
           </div>
           <div style={{ fontSize: 11, color: '#A0AEC0', marginTop: 4 }}>
-            {students.length ? Math.round((loggedTodayIds.size / students.length) * 100) : 0}% of class logged today
+            {students.length ? Math.min(100, Math.round((loggedTodayIds.size / students.length) * 100)) : 0}% of class logged today
           </div>
         </div>
       </div>

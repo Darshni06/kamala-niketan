@@ -179,8 +179,13 @@ export const deleteStudent = async (id) => {
   if (error) throw error
 }
 
-// Hard delete — use this if soft delete isn't working
+// Hard delete — removes student AND all their progress/notes records
 export const hardDeleteStudent = async (id) => {
+  // Delete progress records first
+  await supabase.from('progress').delete().eq('student_id', id)
+  // Delete teacher notes
+  await supabase.from('teacher_notes').delete().eq('student_id', id)
+  // Delete the student
   const { error } = await supabase.from('students').delete().eq('id', id)
   if (error) throw error
 }
