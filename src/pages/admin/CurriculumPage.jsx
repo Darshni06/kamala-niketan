@@ -7,7 +7,9 @@ import {
   getCategoriesBySubject, addCategory, updateCategoryName, deleteCategoryCascade,
   getSkillsByCategory, addSkill, updateSkillName, deleteSkillCascade,
   getActivitiesBySkill, addActivity, updateActivityName, deleteActivityById,
+  bulkImportCurriculum,
 } from '../../supabase/services'
+import { parseCurriculumExcel } from '../../utils/exportUtils'
 
 function AddRow({ placeholder, onAdd, onCancel, saving }) {
   const [val, setVal] = useState('')
@@ -47,6 +49,8 @@ export default function CurriculumPage() {
   const [error,    setError]    = useState('')
   const [success,  setSuccess]  = useState('')
   const [confirm,  setConfirm]  = useState(null)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
 
   const [openSub,   setOpenSub]   = useState(null)
   const [openCat,   setOpenCat]   = useState(null)
@@ -161,11 +165,40 @@ export default function CurriculumPage() {
     <div>
       <PageHeader role="admin" title="Curriculum" subtitle="Subject → Category → Skill → Activity"
         action={
-          <button className="btn-primary" onClick={() => { setAdding({ type: 'subject', parentKey: grade }); setEditing(null) }}>
-            + Add Subject
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <label style={{ cursor: 'pointer' }}>
+              <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const file = e.target.files[0]
+                  if (!file) return
+                  setImporting(true); setImportMsg(''); setError('')
+                  try {
+                    const rows = await parseCurriculumExcel(file)
+                    const result = await bulkImportCurriculum(rows)
+                    await load()
+                    setImportMsg(`Imported: ${result.created.subjects} subjects, ${result.created.categories} categories, ${result.created.skills} skills, ${result.created.activities} activities. (${result.skipped} skipped/duplicate)`)
+                    setTimeout(() => setImportMsg(''), 8000)
+                  } catch (err) {
+                    setError('Import failed: ' + err.message)
+                  } finally {
+                    setImporting(false)
+                    e.target.value = ''
+                  }
+                }} />
+              <span className="btn-ghost">{importing ? 'Importing…' : '📥 Import Excel'}</span>
+            </label>
+            <button className="btn-primary" onClick={() => { setAdding({ type: 'subject', parentKey: grade }); setEditing(null) }}>
+              + Add Subject
+            </button>
+          </div>
         }
       />
+
+      <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 16 }}>
+        📋 Excel import format: columns <b>Subject</b>, <b>Category</b>, <b>Skill</b>, <b>Activity</b>, <b>Grade</b> (PreKG/LKG/UKG). One row per activity — existing subjects/categories/skills are reused automatically.
+      </div>
+
+      {importMsg && <div className="success-box" style={{ marginBottom: 14 }}>✅ {importMsg}</div>}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: 'rgba(255,255,255,.5)', padding: 4, borderRadius: 12, width: 'fit-content' }}>
         {GRADES.map(g => <div key={g} className={`tab ${grade === g ? 'active' : ''}`} onClick={() => setGrade(g)}>{g}</div>)}

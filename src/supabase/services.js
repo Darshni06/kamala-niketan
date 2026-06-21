@@ -306,6 +306,109 @@ export const deleteActivityById = async (id) => {
   if (error) throw error
 }
 
+// Bulk import curriculum from parsed Excel rows
+// Each row: { subject, category, skill, activity, grade }
+// Creates Subject → Category → Skill → Activity, reusing existing ones by name+parent
+export const bulkImportCurriculum = async (rows) => {
+  // Cache to avoid duplicate inserts within this import run
+  const subjectCache  = {} // grade+name -> id
+  const categoryCache = {} // subjectId+name -> id
+  const skillCache    = {} // categoryId+name -> id
+
+  let created = { subjects: 0, categories: 0, skills: 0, activities: 0 }
+  let skipped = 0
+
+  for (const row of rows) {
+    try {
+      // ── Subject ──
+      const subKey = `${row.grade}::${row.subject}`
+      let subjectId = subjectCache[subKey]
+      if (!subjectId) {
+        const { data: existingSub } = await supabase
+          .from('subjects').select('id')
+          .eq('grade', row.grade).eq('name', row.subject)
+          .maybeSingle()
+        if (existingSub) {
+          subjectId = existingSub.id
+        } else {
+          const { data: newSub, error } = await supabase
+            .from('subjects')
+            .insert({ grade: row.grade, name: row.subject, order: 0 })
+            .select().single()
+          if (error) throw error
+          subjectId = newSub.id
+          created.subjects++
+        }
+        subjectCache[subKey] = subjectId
+      }
+
+      // ── Category ──
+      const catKey = `${subjectId}::${row.category}`
+      let categoryId = categoryCache[catKey]
+      if (!categoryId) {
+        const { data: existingCat } = await supabase
+          .from('categories').select('id')
+          .eq('subject_id', subjectId).eq('name', row.category)
+          .maybeSingle()
+        if (existingCat) {
+          categoryId = existingCat.id
+        } else {
+          const { data: newCat, error } = await supabase
+            .from('categories')
+            .insert({ subject_id: subjectId, name: row.category, order: 0 })
+            .select().single()
+          if (error) throw error
+          categoryId = newCat.id
+          created.categories++
+        }
+        categoryCache[catKey] = categoryId
+      }
+
+      // ── Skill ──
+      const skillKey = `${categoryId}::${row.skill}`
+      let skillId = skillCache[skillKey]
+      if (!skillId) {
+        const { data: existingSkill } = await supabase
+          .from('skills').select('id')
+          .eq('category_id', categoryId).eq('name', row.skill)
+          .maybeSingle()
+        if (existingSkill) {
+          skillId = existingSkill.id
+        } else {
+          const { data: newSkill, error } = await supabase
+            .from('skills')
+            .insert({ category_id: categoryId, name: row.skill, order: 0 })
+            .select().single()
+          if (error) throw error
+          skillId = newSkill.id
+          created.skills++
+        }
+        skillCache[skillKey] = skillId
+      }
+
+      // ── Activity ── (always check for duplicate before inserting)
+      const { data: existingAct } = await supabase
+        .from('activities').select('id')
+        .eq('skill_id', skillId).eq('name', row.activity)
+        .maybeSingle()
+      if (!existingAct) {
+        const { error } = await supabase
+          .from('activities')
+          .insert({ skill_id: skillId, name: row.activity, order: 0 })
+        if (error) throw error
+        created.activities++
+      } else {
+        skipped++
+      }
+    } catch (err) {
+      console.error('Row failed:', row, err)
+      skipped++
+    }
+  }
+
+  return { created, skipped, total: rows.length }
+}
+
 // ─── Progress Records ─────────────────────────────────────────────────────────
 // FIX 3: dateOfPresentation now correctly used as logDate
 

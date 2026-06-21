@@ -24,15 +24,7 @@ export function exportLogsToExcel(records, students, className) {
       lastUpdated = r.updatedAt.toDate().toLocaleDateString('en-IN')
     }
     // Dates array (new Supabase field)
-    const datesLogged = Array.isArray(r.dates)
-      ? r.dates
-          .sort()
-          .map(d => {
-            const dt = new Date(d)
-            return isNaN(dt) ? d : dt.toLocaleDateString('en-IN')
-          })
-          .join(', ')
-      : (r.dateOfPresentation || '')
+    const datesLogged = Array.isArray(r.dates) ? r.dates.join(', ') : (r.dateOfPresentation || '')
 
     return {
       'Student Name':       student?.name         || r.student_name  || r.studentName  || '',
@@ -288,4 +280,36 @@ Use the student's name. No level codes. No heading — just the paragraph.`
   if (!res.ok) throw new Error('Gemini API error: ' + res.status)
   const data = await res.json()
   return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+}
+
+// ─── Parse curriculum Excel ───────────────────────────────────────────────────
+// Expected columns: Subject, Category, Skill, Activity, Grade
+export function parseCurriculumExcel(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result)
+        const wb   = XLSX.read(data, { type: 'array' })
+        const ws   = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws)
+
+        const cleaned = rows.map(r => ({
+          subject:  (r['Subject']  || '').toString().trim(),
+          category: (r['Category'] || '').toString().trim(),
+          skill:    (r['Skill']    || '').toString().trim(),
+          activity: (r['Activity'] || '').toString().trim(),
+          grade:    (r['Grade']    || '').toString().trim(),
+        })).filter(r => r.subject && r.category && r.skill && r.activity && r.grade)
+
+        if (cleaned.length === 0) {
+          reject(new Error('No valid rows found. Check column names: Subject, Category, Skill, Activity, Grade'))
+          return
+        }
+        resolve(cleaned)
+      } catch (err) { reject(err) }
+    }
+    reader.onerror = reject
+    reader.readAsArrayBuffer(file)
+  })
 }
