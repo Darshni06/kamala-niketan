@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { getClasses, getAllStudents, getAllTeachers, getProgressByClass } from '../../supabase/services'
 import { PageHeader, Spinner } from '../../components/UI'
-import { CLASSES, TEAL, PEACH } from '../../utils/theme'
+import { TEAL, PEACH } from '../../utils/theme'
+import { getAllStudents, getProgressByClass } from '../../supabase/services'
 import { format } from 'date-fns'
 
 export default function AdminDashboard() {
