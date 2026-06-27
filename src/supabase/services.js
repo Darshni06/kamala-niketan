@@ -529,32 +529,42 @@ export const getAllProgress = async () => {
 // ─── Teacher notes ────────────────────────────────────────────────────────────
 
 export const saveTeacherNote = async (data) => {
+  // Each month gets its own note row — observations are APPENDED not overwritten
+  // Check if a note already exists for this student + subject + month
   const { data: existing } = await supabase
     .from('teacher_notes').select('id')
     .eq('student_id', data.studentId)
     .eq('subject_id', data.subjectId)
-    .eq('term',       data.term)
+    .eq('month',      data.month || '')
     .maybeSingle()
 
   if (existing) {
+    // Update the note for this specific month
     const { error } = await supabase
       .from('teacher_notes')
-      .update({ note: data.note, updated_at: new Date().toISOString() })
+      .update({
+        note:             data.note,
+        updated_at:       new Date().toISOString(),
+        observation_date: data.observationDate || new Date().toISOString().split('T')[0],
+      })
       .eq('id', existing.id)
     if (error) throw error
   } else {
+    // Insert new note for this month — previous months are preserved
     const { error } = await supabase
       .from('teacher_notes')
       .insert({
-        student_id:   data.studentId,
-        class_id:     data.classId     || '',
-        subject_id:   data.subjectId   || null,
-        subject_name: data.subjectName || '',
-        skill_id:     data.skillId     || null,
-        skill_name:   data.skillName   || '',
-        term:         data.term,
-        note:         data.note,
-        logged_by:    data.loggedBy    || null,
+        student_id:       data.studentId,
+        class_id:         data.classId          || '',
+        subject_id:       data.subjectId        || null,
+        subject_name:     data.subjectName      || '',
+        skill_id:         data.skillId          || null,
+        skill_name:       data.skillName        || '',
+        term:             data.term,
+        month:            data.month            || '',
+        observation_date: data.observationDate  || new Date().toISOString().split('T')[0],
+        note:             data.note,
+        logged_by:        data.loggedBy         || null,
       })
     if (error) throw error
   }

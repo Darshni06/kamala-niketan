@@ -65,7 +65,8 @@ export function exportLogsToExcel(records, students, className) {
     { wch: 20 }, // Level Meaning
     { wch: 18 }, // Date
     { wch: 14 }, // Practice Count
-    { wch: 40 }, // Teacher Note
+    { wch: 10 }, // Observation Month
+    { wch: 40 }, // Observation
     { wch: 18 }, // Logged By
     { wch: 14 }, // Last Updated
   ]

@@ -34,6 +34,8 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   const [existing,    setExisting]    = useState({})  // activityId → { level, total_practice_count, dates }
 
   const [note,        setNote]        = useState('')
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)) // YYYY-MM
+  const [pastNotes,   setPastNotes]   = useState([]) // previous observations for this subject
   const [loading,     setLoading]     = useState(true)
   const [saving,      setSaving]      = useState(false)
   const [saved,       setSaved]       = useState(false)
@@ -90,8 +92,18 @@ export default function ProgressModal({ student, onClose, onSaved }) {
       })
       setLevels(preFillLevels)
     }
+    // Load past teacher notes for this subject
+    if (selSubject) {
+      supabase
+        .from('teacher_notes')
+        .select('*')
+        .eq('student_id', student.id)
+        .eq('subject_id', selSubject)
+        .order('month', { ascending: false })
+        .then(({ data }) => setPastNotes(data || []))
+    }
     load()
-  }, [selSkill, term, student.id])
+  }, [selSkill, term, student.id, selSubject])
 
   const setActivityLevel = (actId, lvl) => {
     setLevels(prev => ({ ...prev, [actId]: prev[actId] === lvl ? null : lvl }))
@@ -135,15 +147,17 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
       if (note.trim()) {
         await saveTeacherNote({
-          studentId:   student.id,
-          classId:     student.classId || student.class_id,
-          subjectId:   selSubject,
-          subjectName: subject?.name || '',
-          skillId:     selSkill,
-          skillName:   skill?.name   || '',
+          studentId:        student.id,
+          classId:          student.classId || student.class_id,
+          subjectId:        selSubject,
+          subjectName:      subject?.name || '',
+          skillId:          selSkill,
+          skillName:        skill?.name   || '',
           term,
-          note:        note.trim(),
-          loggedBy:    profile?.uid || profile?.id || '',
+          month:            selectedMonth,
+          observationDate:  new Date().toISOString().split('T')[0],
+          note:             note.trim(),
+          loggedBy:         profile?.uid || profile?.id || '',
         })
       }
 
@@ -327,12 +341,43 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                 {/* Teacher note */}
                 {selSkill && (
                   <div>
+                    {/* Month picker for observation */}
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label className="form-label">Observation Month</label>
+                        <input type="month" className="form-input"
+                          value={selectedMonth}
+                          onChange={e => setSelectedMonth(e.target.value)}
+                          style={{ maxWidth: 180 }} />
+                      </div>
+                    </div>
+
+                    {/* Past observations dropdown */}
+                    {pastNotes.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <label className="form-label">Previous Observations</label>
+                        <select className="form-select"
+                          onChange={e => {
+                            const selected = pastNotes.find(n => n.id === e.target.value)
+                            if (selected) setNote(selected.note)
+                          }}
+                          defaultValue="">
+                          <option value="">Select a past month to view...</option>
+                          {pastNotes.map(n => (
+                            <option key={n.id} value={n.id}>
+                              {n.month || 'No month'} — {(n.note || '').slice(0, 40)}...
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <label className="form-label">
-                      Teacher Note for {term === 'T1' ? 'Term 1' : term === 'T2' ? 'Term 2' : 'Term 3'}
+                      Observation for {selectedMonth}
                       <span style={{ color: '#A0AEC0', textTransform: 'none', fontWeight: 400, marginLeft: 4, fontSize: 11 }}>(optional)</span>
                     </label>
                     <textarea className="form-textarea" rows={3}
-                      placeholder="Add your observations for this term..."
+                      placeholder="Add your observations for this month..."
                       value={note} onChange={e => setNote(e.target.value)}
                       style={{ resize: 'vertical' }} />
                     <div className="ai-note-box">

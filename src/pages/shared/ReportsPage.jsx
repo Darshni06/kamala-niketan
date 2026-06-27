@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../supabase/services'
+import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../firebase/services'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner } from '../../components/UI'
 import { LEVEL_COLORS, LEVEL_FULL, CLASSES, GRADES, TEAL } from '../../utils/theme'
@@ -41,6 +41,7 @@ export default function ReportsPage({ role }) {
     { id: 'heatmap', icon: '⊞', label: 'Heatmap'       },
   ]
   const [graphType,   setGraphType]   = useState('stacked')
+  const [drillSubject, setDrillSubject] = useState(null) // null = show subjects, string = show categories of that subject
   const [classFilter, setClassFilter] = useState(role === 'teacher' ? profile?.classId : 'All')
   const [gradeFilter, setGradeFilter] = useState('All')
   const [termFilter,  setTermFilter]  = useState('All')
@@ -215,18 +216,54 @@ export default function ReportsPage({ role }) {
 
     if (graphType === 'heatmap') {
       if (heatData.length === 0) return <EmptyChart message="No data yet. Log some progress first." />
-      const maxVal = Math.max(...heatData.flatMap(r => ['M','A','R','P'].map(l => r[l])), 1)
+
+      // Drilldown: if a subject is selected, show its categories
+      const isDrilling = !!drillSubject
+      const tableRows = isDrilling
+        ? (() => {
+            // Category breakdown for drilled subject
+            const catNames = [...new Set(
+              records
+                .filter(r => r.subject_name === drillSubject && (gradeFilter === 'All' || r.grade === gradeFilter) && (termFilter === 'All' || r.term === termFilter))
+                .map(r => r.category_name)
+            )].filter(Boolean)
+            return catNames.map(cat => {
+              const cRecs = records.filter(r => r.subject_name === drillSubject && r.category_name === cat && (gradeFilter === 'All' || r.grade === gradeFilter) && (termFilter === 'All' || r.term === termFilter))
+              const row = { label: cat }
+              ;['M','A','R','P'].forEach(l => { row[l] = cRecs.filter(r => r.level === l).length })
+              return row
+            })
+          })()
+        : heatData.map(d => ({ ...d, label: d.subject }))
+
+      const maxVal = Math.max(...tableRows.flatMap(r => ['M','A','R','P'].map(l => r[l])), 1)
+
       return (
         <div>
-          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Subject Heatmap</div>
-          <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            Number of activity records per level per subject {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''} {termFilter !== 'All' ? `· ${termFilter}` : ''}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+            {isDrilling && (
+              <button className="btn-ghost" style={{ padding: '4px 12px', fontSize: 12 }}
+                onClick={() => setDrillSubject(null)}>
+                ← Back to Subjects
+              </button>
+            )}
+            <div style={{ fontWeight: 600, color: '#2D3748' }}>
+              {isDrilling ? `${drillSubject} — Category Breakdown` : 'Subject Heatmap'}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: isDrilling ? 8 : 20 }}>
+            {isDrilling
+              ? 'Click Back to return to subject view'
+              : 'Click a subject row to drill into its categories'}
+            {gradeFilter !== 'All' ? ` · ${gradeFilter}` : ''} {termFilter !== 'All' ? ` · ${termFilter}` : ''}
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left', fontSize: 11, color: '#718096', paddingBottom: 10, fontWeight: 700, paddingRight: 16 }}>Subject</th>
+                  <th style={{ textAlign: 'left', fontSize: 11, color: '#718096', paddingBottom: 10, fontWeight: 700, paddingRight: 16 }}>
+                    {isDrilling ? 'Category' : 'Subject (click to drill)'}
+                  </th>
                   {['M','A','R','P'].map(l => (
                     <th key={l} style={{ textAlign: 'center', fontSize: 12, color: LEVEL_COLORS[l], paddingBottom: 10, fontWeight: 800, width: 80 }}>
                       {l}<br/><span style={{ fontWeight: 400, fontSize: 10, color: '#A0AEC0' }}>{LEVEL_FULL[l]}</span>
@@ -235,9 +272,13 @@ export default function ReportsPage({ role }) {
                 </tr>
               </thead>
               <tbody>
-                {heatData.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #F7FAFC' }}>
-                    <td style={{ fontSize: 12, color: '#4A5568', padding: '8px 16px 8px 0', fontWeight: 500 }}>{row.subject}</td>
+                {tableRows.map((row, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #F7FAFC', cursor: isDrilling ? 'default' : 'pointer' }}
+                    onClick={() => !isDrilling && setDrillSubject(row.label)}>
+                    <td style={{ fontSize: 12, color: isDrilling ? '#4A5568' : TEAL, padding: '8px 16px 8px 0', fontWeight: 500,
+                      textDecoration: isDrilling ? 'none' : 'underline dotted' }}>
+                      {row.label}
+                    </td>
                     {['M','A','R','P'].map(l => {
                       const v  = row[l] || 0
                       const op = v === 0 ? 1 : Math.min(0.95, 0.25 + (v / maxVal) * 0.7)
