@@ -314,3 +314,42 @@ export function parseCurriculumExcel(file) {
     reader.readAsArrayBuffer(file)
   })
 }
+
+// ─── Export observations for one student ─────────────────────────────────────
+
+export function exportObservationsToExcel(observations, studentName) {
+  if (!observations || observations.length === 0) {
+    alert('No observations recorded for this student yet.')
+    return
+  }
+
+  const rows = observations.map(n => ({
+    'Subject':           n.subject_name      || '',
+    'Skill':             n.skill_name        || '',
+    'Observation Month': n.month             || '',
+    'Date Recorded':     n.observation_date
+                           ? new Date(n.observation_date).toLocaleDateString('en-IN')
+                           : '',
+    'Term':              n.term              || '',
+    'Observation Note':  n.note              || '',
+    'Recorded By':       n.logged_by_name    || '',
+  }))
+
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [
+    { wch: 20 }, // Subject
+    { wch: 26 }, // Skill
+    { wch: 16 }, // Observation Month
+    { wch: 14 }, // Date Recorded
+    { wch: 8  }, // Term
+    { wch: 50 }, // Observation Note
+    { wch: 18 }, // Recorded By
+  ]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Observations')
+  XLSX.writeFile(
+    wb,
+    `${studentName.replace(/\s+/g, '_')}_observations_${new Date().toISOString().split('T')[0]}.xlsx`
+  )
+}

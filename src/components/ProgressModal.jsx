@@ -12,7 +12,9 @@ import {
   getCategoriesBySubject,
   getSkillsByCategory,
   getActivitiesBySkill,
+  getObservationsByStudent,
 } from '../supabase/services'
+import { exportObservationsToExcel } from '../utils/exportUtils'
 
 export default function ProgressModal({ student, onClose, onSaved }) {
   const { profile } = useAuth()
@@ -40,6 +42,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   const [saving,      setSaving]      = useState(false)
   const [saved,       setSaved]       = useState(false)
   const [saveError,   setSaveError]   = useState('')
+  const [downloadingObs, setDownloadingObs] = useState(false)
 
   // Load subjects
   useEffect(() => {
@@ -171,6 +174,18 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     }
   }
 
+  const handleDownloadObservations = async () => {
+    setDownloadingObs(true)
+    try {
+      const obs = await getObservationsByStudent(student.id)
+      exportObservationsToExcel(obs, student.name)
+    } catch (err) {
+      console.error('Failed to download observations:', err)
+    } finally {
+      setDownloadingObs(false)
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -195,7 +210,16 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                   <GradeBadge grade={student.grade} />
                 </div>
               </div>
-              <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  onClick={handleDownloadObservations}
+                  disabled={downloadingObs}
+                  className="btn-ghost"
+                  style={{ fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap' }}>
+                  {downloadingObs ? '…' : '📥 Observations'}
+                </button>
+                <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
+              </div>
             </div>
             <div className="divider" />
 

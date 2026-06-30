@@ -573,6 +573,7 @@ export const saveTeacherNote = async (data) => {
 export const getAllTeacherNotesByStudent = async (studentId) => {
   const { data, error } = await supabase
     .from('teacher_notes').select('*').eq('student_id', studentId)
+    .order('month', { ascending: true })
   if (error) return []
   return data.map(n => ({
     ...n,
@@ -581,4 +582,15 @@ export const getAllTeacherNotesByStudent = async (studentId) => {
     subjectName: n.subject_name,
     skillId:     n.skill_id,
   }))
+}
+
+// Fetch observations for one student for Excel export
+export const getObservationsByStudent = async (studentId) => {
+  const { data, error } = await supabase
+    .from('teacher_notes')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('month', { ascending: true })
+  if (error) return []
+  return data
 }
