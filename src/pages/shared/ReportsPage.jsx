@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../supabase/services'
+import { getProgressByClass, getAllStudents, getStudentsByClass, getAllProgress } from '../../firebase/services'
 import { useAuth } from '../../contexts/AuthContext'
 import { PageHeader, Spinner } from '../../components/UI'
 import { LEVEL_COLORS, LEVEL_FULL, CLASSES, GRADES, TEAL } from '../../utils/theme'
+import { exportObservationsToExcel } from '../../utils/exportUtils'
+import { getAllStudents, getProgressByClass } from '../../supabase/services'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   LineChart, Line, PieChart, Pie, Cell,
@@ -35,19 +37,23 @@ export default function ReportsPage({ role }) {
   const { profile } = useAuth()
 
   const GRAPH_TYPES = [
-    { id: 'stacked', icon: '▦', label: 'Stacked Bar'  },
-    { id: 'line',    icon: '↗', label: 'Progress Line' },
-    { id: 'donut',   icon: '◎', label: 'Donut / Pie'   },
-    { id: 'heatmap', icon: '⊞', label: 'Heatmap'       },
+    { id: 'stacked',   icon: '▦', label: 'Stacked Bar'      },
+    { id: 'line',      icon: '↗', label: 'Progress Line'     },
+    { id: 'donut',     icon: '◎', label: 'Donut / Pie'       },
+    { id: 'heatmap',   icon: '⊞', label: 'Heatmap'           },
+    { id: 'classcomp', icon: '⧖', label: 'Class Comparison'  },
   ]
   const [graphType,   setGraphType]   = useState('stacked')
   const [drillSubject, setDrillSubject] = useState(null) // null = show subjects, string = show categories of that subject
   const [classFilter, setClassFilter] = useState(role === 'teacher' ? profile?.classId : 'All')
   const [gradeFilter, setGradeFilter] = useState('All')
   const [termFilter,  setTermFilter]  = useState('All')
-  const [allRecords,  setAllRecords]  = useState([])
-  const [allStudents, setAllStudents] = useState([])
-  const [loading,     setLoading]     = useState(true)
+  const [allRecords,    setAllRecords]    = useState([])
+  const [allStudents,   setAllStudents]   = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [classCompData, setClassCompData] = useState([])
+  const [allNotes,      setAllNotes]      = useState([])
+  const [exportingObs,  setExportingObs]  = useState(false)
 
   // Fetch data when class filter changes
   useEffect(() => {
@@ -64,6 +70,27 @@ export default function ReportsPage({ role }) {
         ])
         setAllRecords(recs)
         setAllStudents(studs)
+
+        // FIX 3: Build class comparison data — for admin only
+        if (role === 'admin') {
+          // Get all progress grouped by class
+          const allProg = recs.length ? recs : []
+          const classIds = [...new Set(allProg.map(r => r.class_id).filter(Boolean))].sort()
+          const compData = classIds.map(cls => {
+            const clsRecs = allProg.filter(r => r.class_id === cls)
+            const total   = clsRecs.length || 1
+            // Average level score per class: M=1,A=2,R=3,P=4
+            const weight  = { M:1, A:2, R:3, P:4 }
+            const avg     = clsRecs.reduce((s,r) => s + (weight[r.level]||0), 0) / total
+            return { class: cls, avgScore: parseFloat(avg.toFixed(2)), total: clsRecs.length }
+          })
+          setClassCompData(compData)
+
+          // FIX 2: fetch all teacher notes for admin export
+          const { data: notes } = await import('../../supabase/client')
+            .then(({ supabase }) => supabase.from('teacher_notes').select('*').order('month'))
+          setAllNotes(notes || [])
+        }
       } catch (e) { console.error(e) }
       finally { setLoading(false) }
     }
@@ -222,13 +249,20 @@ export default function ReportsPage({ role }) {
       const tableRows = isDrilling
         ? (() => {
             // Category breakdown for drilled subject
+            // FIX 4: use both snake_case and camelCase field names for category
+            const getCatName = r => r.category_name || r.categoryName || ''
             const catNames = [...new Set(
               records
-                .filter(r => r.subject_name === drillSubject && (gradeFilter === 'All' || r.grade === gradeFilter) && (termFilter === 'All' || r.term === termFilter))
-                .map(r => r.category_name)
+                .filter(r => (r.subject_name || r.subjectName) === drillSubject && (gradeFilter === 'All' || r.grade === gradeFilter) && (termFilter === 'All' || r.term === termFilter))
+                .map(getCatName)
             )].filter(Boolean)
             return catNames.map(cat => {
-              const cRecs = records.filter(r => r.subject_name === drillSubject && r.category_name === cat && (gradeFilter === 'All' || r.grade === gradeFilter) && (termFilter === 'All' || r.term === termFilter))
+              const cRecs = records.filter(r =>
+                (r.subject_name || r.subjectName) === drillSubject &&
+                getCatName(r) === cat &&
+                (gradeFilter === 'All' || r.grade === gradeFilter) &&
+                (termFilter === 'All' || r.term === termFilter)
+              )
               const row = { label: cat }
               ;['M','A','R','P'].forEach(l => { row[l] = cRecs.filter(r => r.level === l).length })
               return row
@@ -308,6 +342,38 @@ export default function ReportsPage({ role }) {
     }
   }  // end renderChart
 
+    if (graphType === 'classcomp') {
+      if (classCompData.length === 0) return <EmptyChart message="No class data yet. Logs must exist across multiple classes." />
+      const levelMap = { 1:'M', 2:'A', 3:'R', 4:'P' }
+      return (
+        <div>
+          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Class Comparison — Average Progress Level</div>
+          <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
+            Each class's average level score across all logged activities (M=1 → P=4)
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={classCompData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#EDF2F7" />
+              <XAxis dataKey="class" tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 4]} ticks={[1,2,3,4]}
+                tickFormatter={v => ['','M','A','R','P'][v] || v}
+                tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v, n) => [
+                `${v} (${['','M','A','R','P'][Math.round(v)] || ''})`,
+                'Avg Level'
+              ]} />
+              <Bar dataKey="avgScore" fill={TEAL} radius={[6,6,0,0]}
+                label={{ position: 'top', fontSize: 10, formatter: v => ['','M','A','R','P'][Math.round(v)] || '' }} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ fontSize: 12, color: '#A0AEC0', marginTop: 12 }}>
+            Y-axis: 1=M (Making effort) · 2=A (Advancing) · 3=R (Reaching milestone) · 4=P (Proficient)
+          </div>
+        </div>
+      )
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -330,7 +396,7 @@ export default function ReportsPage({ role }) {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, marginBottom: 12 }}>
           Select Graph Type
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
           {GRAPH_TYPES.map(g => (
             <button key={g.id} className={`graph-type-btn ${graphType === g.id ? 'active' : ''}`}
               onClick={() => setGraphType(g.id)}>

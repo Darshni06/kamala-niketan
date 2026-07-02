@@ -96,14 +96,18 @@ export default function ProgressModal({ student, onClose, onSaved }) {
       setLevels(preFillLevels)
     }
     // Load past teacher notes for this subject
-    if (selSubject) {
+    if (selSubject && selSkill) {
+      // FIX 1: filter by skill_id so dropdown shows only this skill's observations
       supabase
         .from('teacher_notes')
         .select('*')
         .eq('student_id', student.id)
         .eq('subject_id', selSubject)
+        .eq('skill_id',   selSkill)
         .order('month', { ascending: false })
         .then(({ data }) => setPastNotes(data || []))
+    } else {
+      setPastNotes([])
     }
     load()
   }, [selSkill, term, student.id, selSubject])
