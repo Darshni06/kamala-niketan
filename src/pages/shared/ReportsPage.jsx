@@ -437,4 +437,3 @@ export default function ReportsPage({ role }) {
       </div>
     </div>
   )
-}
