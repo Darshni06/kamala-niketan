@@ -215,7 +215,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     setDownloadingObs(true)
     try {
       const obs = await getObservationsByStudent(student.id)
-      exportObservationsToExcel(obs, student.name)
+      exportObservationsToExcel(obs, student.name, {
+        [student.id]: { name: student.name, grade: student.grade },
+      })
     } catch (err) {
       console.error('Failed to download observations:', err)
     } finally {
@@ -284,7 +286,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
             {/* Date */}
             {selCategory && (
               <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Date of Presentation</label>
+                <label className="form-label">Date</label>
                 <input type="date" className="form-input" value={date}
                   onChange={e => setDate(e.target.value)} style={{ maxWidth: 220 }} />
               </div>

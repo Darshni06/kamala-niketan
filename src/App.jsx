@@ -12,6 +12,8 @@ import TeachersPage   from './pages/admin/TeachersPage'
 import ReportsPage    from './pages/shared/ReportsPage'
 import ReportCardPage from './pages/shared/ReportCardPage'
 import MyClassPage    from './pages/teacher/MyClassPage'
+import WeeklyPlanPage      from './pages/teacher/WeeklyPlanPage'
+import WeeklyPlanAdminPage from './pages/admin/WeeklyPlanAdminPage'
 
 // ── Protected layout wrapper ──────────────────────────────────────────────────
 function AppLayout({ children, screen, onNav }) {
@@ -31,6 +33,7 @@ function AdminApp() {
     curriculum: <CurriculumPage />,
     students:   <StudentsPage />,
     teachers:   <TeachersPage />,
+    weeklyplan: <WeeklyPlanAdminPage />,
     reports:    <ReportsPage role="admin" />,
     reportcard: <ReportCardPage role="admin" />,
   }
@@ -46,6 +49,7 @@ function TeacherApp() {
   const [screen, setScreen] = useState('myclass')
   const screenMap = {
     myclass:    <MyClassPage />,
+    weeklyplan: <WeeklyPlanPage />,
     reports:    <ReportsPage role="teacher" />,
     reportcard: <ReportCardPage role="teacher" />,
   }

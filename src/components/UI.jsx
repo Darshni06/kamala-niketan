@@ -9,11 +9,13 @@ const ADMIN_NAV = [
   { id: 'curriculum',  icon: '📚', label: 'Curriculum'   },
   { id: 'students',    icon: '🎓', label: 'Students'     },
   { id: 'teachers',    icon: '👤', label: 'Teachers'     },
+  { id: 'weeklyplan',  icon: '🗓️', label: 'Class Plans'  },
   { id: 'reports',     icon: '📊', label: 'Reports'      },
   { id: 'reportcard',  icon: '📄', label: 'Report Cards' },
 ]
 const TEACHER_NAV = [
   { id: 'myclass',    icon: '⊞',  label: 'My Class'     },
+  { id: 'weeklyplan', icon: '🗓️', label: 'Weekly Plan'  },
   { id: 'reports',    icon: '📊', label: 'Reports'      },
   { id: 'reportcard', icon: '📄', label: 'Report Cards' },
 ]

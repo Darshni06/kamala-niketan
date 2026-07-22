@@ -315,28 +315,44 @@ export function parseCurriculumExcel(file) {
   })
 }
 
-// ─── Export observations for one student ─────────────────────────────────────
+// ─── Export observations for one student (or, for admin, many students) ──────
+// `studentsById` is an optional lookup — { [studentId]: { name, grade } } —
+// used to fill in the Student Name / Grade columns when exporting a bulk set
+// of observations that spans more than one student. When exporting for a
+// single student, pass their id/name/grade in `studentsById` too so those
+// columns are always populated.
 
-export function exportObservationsToExcel(observations, studentName) {
+export function exportObservationsToExcel(observations, label, studentsById = {}) {
   if (!observations || observations.length === 0) {
-    alert('No observations recorded for this student yet.')
+    alert('No observations recorded yet.')
     return
   }
 
-  const rows = observations.map(n => ({
-    'Subject':           n.subject_name      || '',
-    'Skill':             n.skill_name        || '',
-    'Observation Month': n.month             || '',
-    'Date Recorded':     n.observation_date
-                           ? new Date(n.observation_date).toLocaleDateString('en-IN')
-                           : '',
-    'Term':              n.term              || '',
-    'Observation Note':  n.note              || '',
-    'Recorded By':       n.logged_by_name    || '',
-  }))
+  const rows = observations.map(n => {
+    const sid = n.student_id || n.studentId
+    const stu = studentsById[sid]
+    return {
+      'Student Name':      stu?.name  || n.student_name || '',
+      'Grade':             stu?.grade || n.grade         || '',
+      'Subject':           n.subject_name      || '',
+      'Skill':             n.skill_name        || '',
+      'Observation Month': n.month             || '',
+      'Date Recorded':     n.observation_date
+                             ? new Date(n.observation_date).toLocaleDateString('en-IN')
+                             : '',
+      'Term':              n.term              || '',
+      'Observation Note':  n.note              || '',
+      'Recorded By':       n.logged_by_name    || '',
+    }
+  })
+
+  // Sort by student name so multi-student exports read like a class list
+  rows.sort((a, b) => (a['Student Name'] || '').localeCompare(b['Student Name'] || ''))
 
   const ws = XLSX.utils.json_to_sheet(rows)
   ws['!cols'] = [
+    { wch: 22 }, // Student Name
+    { wch: 8  }, // Grade
     { wch: 20 }, // Subject
     { wch: 26 }, // Skill
     { wch: 16 }, // Observation Month
@@ -350,6 +366,64 @@ export function exportObservationsToExcel(observations, studentName) {
   XLSX.utils.book_append_sheet(wb, ws, 'Observations')
   XLSX.writeFile(
     wb,
-    `${studentName.replace(/\s+/g, '_')}_observations_${new Date().toISOString().split('T')[0]}.xlsx`
+    `${(label || 'Observations').replace(/\s+/g, '_')}_observations_${new Date().toISOString().split('T')[0]}.xlsx`
+  )
+}
+
+// ─── Weekly Plan Excel export ─────────────────────────────────────────────────
+// `plans` — array of weekly_plans rows (already mapped: studentName, subjectName,
+// activityName, fromDate, toDate, presentationCount, groupName, grade, classId)
+
+export function exportWeeklyPlanToExcel(plans, label) {
+  if (!plans || plans.length === 0) {
+    alert('No weekly plan entries to export yet.')
+    return
+  }
+
+  const statusLabel = (count) => {
+    const n = count || 0
+    if (n === 0) return 'PL — Planned'
+    if (n === 1) return 'PR — Presented'
+    return `P-${n - 1} — Practiced again`
+  }
+
+  const rows = plans.map(p => ({
+    'Class':          p.classId     || p.class_id     || '',
+    'Grade':          p.grade       || '',
+    'Student Name':   p.studentName || p.student_name  || '',
+    'Group':          p.groupName   || p.group_name    || '',
+    'Subject':        p.subjectName || p.subject_name  || '',
+    'Activity':       p.activityName || p.activity_name || '',
+    'From Date':      p.fromDate    || p.from_date     || '',
+    'To Date':        p.toDate      || p.to_date       || '',
+    'Status':         statusLabel(p.presentationCount ?? p.presentation_count),
+    'Times Logged':   p.presentationCount ?? p.presentation_count ?? 0,
+  }))
+
+  rows.sort((a, b) => {
+    const c = (a['Class'] || '').localeCompare(b['Class'] || '')
+    if (c !== 0) return c
+    return (a['Student Name'] || '').localeCompare(b['Student Name'] || '')
+  })
+
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [
+    { wch: 10 }, // Class
+    { wch: 8  }, // Grade
+    { wch: 22 }, // Student Name
+    { wch: 16 }, // Group
+    { wch: 18 }, // Subject
+    { wch: 32 }, // Activity
+    { wch: 12 }, // From Date
+    { wch: 12 }, // To Date
+    { wch: 22 }, // Status
+    { wch: 12 }, // Times Logged
+  ]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Weekly Plan')
+  XLSX.writeFile(
+    wb,
+    `${(label || 'Weekly_Plan').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
   )
 }

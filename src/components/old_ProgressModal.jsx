@@ -21,12 +21,13 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
   const [subjects,    setSubjects]    = useState([])
   const [categories,  setCategories]  = useState([])
-  const [skills,      setSkills]      = useState([])
-  const [activities,  setActivities]  = useState([])
+  // FIX 2: skills are no longer a separate selection step. Instead, once a
+  // category is chosen we load every skill under it plus that skill's
+  // activities, and render each skill as a subheading above its activities.
+  const [skillGroups, setSkillGroups] = useState([]) // [{ skill, activities: [...] }]
 
   const [selSubject,  setSelSubject]  = useState('')
   const [selCategory, setSelCategory] = useState('')
-  const [selSkill,    setSelSkill]    = useState('')
   const [term,        setTerm]        = useState('T1')
   const [date,        setDate]        = useState(new Date().toISOString().split('T')[0])
 
@@ -39,10 +40,13 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)) // YYYY-MM
   const [pastNotes,   setPastNotes]   = useState([]) // previous observations for this subject
   const [loading,     setLoading]     = useState(true)
+  const [groupsLoading, setGroupsLoading] = useState(false)
   const [saving,      setSaving]      = useState(false)
-  const [saved,       setSaved]       = useState(false)
+  const [savedBanner, setSavedBanner] = useState(false) // FIX 3: transient banner, not a full-screen takeover
   const [saveError,   setSaveError]   = useState('')
   const [downloadingObs, setDownloadingObs] = useState(false)
+
+  const allActivities = skillGroups.flatMap(g => g.activities)
 
   // Load subjects
   useEffect(() => {
@@ -55,69 +59,76 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   // Load categories when subject changes
   useEffect(() => {
     if (!selSubject) return
-    setSelCategory(''); setSelSkill(''); setActivities([]); setLevels({}); setCounts({})
+    setSelCategory(''); setSkillGroups([]); setLevels({}); setCounts({})
     getCategoriesBySubject(selSubject).then(setCategories)
   }, [selSubject])
 
-  // Load skills when category changes
+  // FIX 2: load every skill under the chosen category, and every activity
+  // under each of those skills, in one go — no more skill dropdown.
   useEffect(() => {
-    if (!selCategory) return
-    setSelSkill(''); setActivities([]); setLevels({}); setCounts({})
-    getSkillsByCategory(selCategory).then(setSkills)
+    if (!selCategory) { setSkillGroups([]); return }
+    setLevels({}); setCounts({})
+    setGroupsLoading(true)
+    const load = async () => {
+      const skillsList = await getSkillsByCategory(selCategory)
+      const groups = await Promise.all(skillsList.map(async sk => {
+        const acts = await getActivitiesBySkill(sk.id)
+        return { skill: sk, activities: acts.map(a => ({ ...a, skillId: sk.id, skillName: sk.name })) }
+      }))
+      setSkillGroups(groups)
+      setGroupsLoading(false)
+    }
+    load()
   }, [selCategory])
 
-  // Load activities + existing progress when skill + term changes
+  // Load existing progress + pre-fill levels whenever the activity set or term changes
   useEffect(() => {
-    if (!selSkill) return
-    setLevels({}); setCounts({})
-    const load = async () => {
-      const [acts, progressRecs] = await Promise.all([
-        getActivitiesBySkill(selSkill),
-        getProgressByStudent(student.id),
-      ])
-      setActivities(acts)
-      // Build existing map: activityId → existing record for this term
+    if (allActivities.length === 0) { setExisting({}); return }
+    let cancelled = false
+    getProgressByStudent(student.id).then(progressRecs => {
+      if (cancelled) return
+      const actIds = new Set(allActivities.map(a => a.id))
       const existingMap = {}
       progressRecs.forEach(r => {
-        if (r.term === term && r.activityId) {
+        if (r.term === term && r.activityId && actIds.has(r.activityId)) {
           existingMap[r.activityId] = {
-            level:          r.level,
-            totalCount:     r.practiceCount || r.total_practice_count || 0,
-            dates:          r.dates || [],
+            level:      r.level,
+            totalCount: r.practiceCount || r.total_practice_count || 0,
+            dates:      r.dates || [],
           }
         }
       })
       setExisting(existingMap)
-      // Pre-fill levels from existing
       const preFillLevels = {}
-      Object.entries(existingMap).forEach(([actId, rec]) => {
-        preFillLevels[actId] = rec.level
-      })
+      Object.entries(existingMap).forEach(([actId, rec]) => { preFillLevels[actId] = rec.level })
       setLevels(preFillLevels)
-    }
-    // Load past teacher notes for this subject
-    if (selSubject && selSkill) {
-      // FIX 1: filter by skill_id so dropdown shows only this skill's observations
-      supabase
-        .from('teacher_notes')
-        .select('*')
-        .eq('student_id', student.id)
-        .eq('subject_id', selSubject)
-        .eq('skill_id',   selSkill)
-        .order('month', { ascending: false })
-        .then(({ data }) => setPastNotes(data || []))
-    } else {
-      setPastNotes([])
-    }
-    load()
-  }, [selSkill, term, student.id, selSubject])
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillGroups, term, student.id])
+
+  // Past teacher notes for this subject (notes are scoped by subject + month, not skill)
+  useEffect(() => {
+    if (!selSubject) { setPastNotes([]); return }
+    supabase
+      .from('teacher_notes')
+      .select('*')
+      .eq('student_id', student.id)
+      .eq('subject_id', selSubject)
+      .order('month', { ascending: false })
+      .then(({ data }) => setPastNotes(data || []))
+  }, [selSubject, student.id])
 
   const setActivityLevel = (actId, lvl) => {
     setLevels(prev => ({ ...prev, [actId]: prev[actId] === lvl ? null : lvl }))
   }
 
-  const handleSave = async () => {
-    const toSave = activities.filter(a => levels[a.id])
+  // FIX 3: saving no longer force-closes the modal. `closeAfter` lets the
+  // teacher explicitly choose to save-and-close; the default Save keeps the
+  // modal open so they can keep navigating between subjects/categories for
+  // the same student without having to re-open and re-pick the student.
+  const handleSave = async (closeAfter = false) => {
+    const toSave = allActivities.filter(a => levels[a.id])
     if (toSave.length === 0 && !note.trim()) {
       setSaveError('Please select at least one level before saving.')
       return
@@ -126,7 +137,6 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
     const subject  = subjects.find(s => s.id === selSubject)
     const category = categories.find(c => c.id === selCategory)
-    const skill    = skills.find(s => s.id === selSkill)
 
     try {
       for (const act of toSave) {
@@ -140,8 +150,8 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           subjectName:   subject?.name    || '',
           categoryId:    selCategory,
           categoryName:  category?.name   || '',
-          skillId:       selSkill,
-          skillName:     skill?.name      || '',
+          skillId:       act.skillId,
+          skillName:     act.skillName,
           activityId:          act.id,
           activityName:        act.name,
           level:               levels[act.id],
@@ -158,8 +168,6 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           classId:          student.classId || student.class_id,
           subjectId:        selSubject,
           subjectName:      subject?.name || '',
-          skillId:          selSkill,
-          skillName:        skill?.name   || '',
           term,
           month:            selectedMonth,
           observationDate:  new Date().toISOString().split('T')[0],
@@ -168,8 +176,33 @@ export default function ProgressModal({ student, onClose, onSaved }) {
         })
       }
 
-      setSaved(true)
-      setTimeout(() => { onSaved?.(); onClose() }, 1300)
+      onSaved?.()
+
+      // Refresh "existing" progress so saved levels/counts/dates show as logged,
+      // and clear the new-count inputs + note so the teacher can log the next
+      // thing without stale values lingering.
+      const progressRecs = await getProgressByStudent(student.id)
+      const actIds = new Set(allActivities.map(a => a.id))
+      const existingMap = {}
+      progressRecs.forEach(r => {
+        if (r.term === term && r.activityId && actIds.has(r.activityId)) {
+          existingMap[r.activityId] = {
+            level:      r.level,
+            totalCount: r.practiceCount || r.total_practice_count || 0,
+            dates:      r.dates || [],
+          }
+        }
+      })
+      setExisting(existingMap)
+      setCounts({})
+      setNote('')
+
+      setSavedBanner(true)
+      setTimeout(() => setSavedBanner(false), 2200)
+
+      if (closeAfter) {
+        onClose()
+      }
     } catch (err) {
       console.error('Save failed:', err)
       setSaveError('Save failed: ' + (err?.message || 'Unknown error'))
@@ -193,118 +226,121 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
-        {saved ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <div style={{ fontSize: 52, marginBottom: 14 }}>✅</div>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+          <div>
             <div style={{ fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 700, color: '#2D3748' }}>
-              Progress Saved!
+              Log Progress
             </div>
-            <div style={{ color: '#718096', marginTop: 8 }}>Record logged for {student.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+              <span style={{ fontSize: 14, color: '#4A5568', fontWeight: 500 }}>{student.name}</span>
+              <GradeBadge grade={student.grade} />
+            </div>
           </div>
-        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={handleDownloadObservations}
+              disabled={downloadingObs}
+              className="btn-ghost"
+              style={{ fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap' }}>
+              {downloadingObs ? '…' : '📥 Observations'}
+            </button>
+            {/* FIX 3: the cross mark always closes, regardless of unsaved/saved state */}
+            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
+          </div>
+        </div>
+        <div className="divider" />
+
+        {/* FIX 3: transient success banner instead of replacing the whole modal */}
+        {savedBanner && (
+          <div className="success-box" style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+            ✅ Progress saved for {student.name}. Keep going, or close whenever you're done.
+          </div>
+        )}
+
+        {loading ? <Spinner center /> : (
           <>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+            {/* Subject + Category */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
               <div>
-                <div style={{ fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 700, color: '#2D3748' }}>
-                  Log Progress
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
-                  <span style={{ fontSize: 14, color: '#4A5568', fontWeight: 500 }}>{student.name}</span>
-                  <GradeBadge grade={student.grade} />
-                </div>
+                <label className="form-label">Subject</label>
+                <select className="form-select" value={selSubject}
+                  onChange={e => { setSelSubject(e.target.value); setSelCategory('') }}>
+                  <option value="">Select subject...</option>
+                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <button
-                  onClick={handleDownloadObservations}
-                  disabled={downloadingObs}
-                  className="btn-ghost"
-                  style={{ fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap' }}>
-                  {downloadingObs ? '…' : '📥 Observations'}
-                </button>
-                <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
+              <div>
+                <label className="form-label">Category</label>
+                <select className="form-select" value={selCategory}
+                  onChange={e => setSelCategory(e.target.value)}
+                  disabled={!selSubject}>
+                  <option value="">Select category...</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
             </div>
-            <div className="divider" />
 
-            {loading ? <Spinner center /> : (
-              <>
-                {/* Subject + Category */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-                  <div>
-                    <label className="form-label">Subject</label>
-                    <select className="form-select" value={selSubject}
-                      onChange={e => { setSelSubject(e.target.value); setSelCategory(''); setSelSkill('') }}>
-                      <option value="">Select subject...</option>
-                      {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+            {/* Date */}
+            {selCategory && (
+              <div style={{ marginBottom: 14 }}>
+                <label className="form-label">Date of Presentation</label>
+                <input type="date" className="form-input" value={date}
+                  onChange={e => setDate(e.target.value)} style={{ maxWidth: 220 }} />
+              </div>
+            )}
+
+            {/* Term tabs */}
+            {selCategory && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, flexShrink: 0 }}>
+                  Recording for:
+                </span>
+                {['T1', 'T2', 'T3'].map(t => (
+                  <div key={t} className={`term-tab ${term === t ? 'active' : ''}`} onClick={() => setTerm(t)}>
+                    {t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3'}
                   </div>
-                  <div>
-                    <label className="form-label">Category</label>
-                    <select className="form-select" value={selCategory}
-                      onChange={e => { setSelCategory(e.target.value); setSelSkill('') }}
-                      disabled={!selSubject}>
-                      <option value="">Select category...</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                ))}
+              </div>
+            )}
+
+            {/* Activities table — grouped under skill subheadings (FIX 2) */}
+            {selCategory && (
+              <div className="glass" style={{ borderRadius: 12, padding: '4px 14px', marginBottom: 14 }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
+                  <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
+                    Activity
                   </div>
+                  <div style={{ width: 80, textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
+                    Count
+                  </div>
+                  {LEVELS.map(l => (
+                    <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
+                  ))}
                 </div>
 
-                {/* Skill */}
-                {selCategory && (
-                  <div style={{ marginBottom: 14 }}>
-                    <label className="form-label">Skill</label>
-                    <select className="form-select" value={selSkill} onChange={e => setSelSkill(e.target.value)}>
-                      <option value="">Select skill...</option>
-                      {skills.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                {groupsLoading ? (
+                  <div style={{ padding: '20px 0' }}><Spinner center /></div>
+                ) : skillGroups.length === 0 ? (
+                  <div style={{ padding: '16px 0', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
+                    No skills under this category. Add them in Curriculum.
                   </div>
-                )}
-
-                {/* Date */}
-                {selSkill && (
-                  <div style={{ marginBottom: 14 }}>
-                    <label className="form-label">Date of Presentation</label>
-                    <input type="date" className="form-input" value={date}
-                      onChange={e => setDate(e.target.value)} style={{ maxWidth: 220 }} />
-                  </div>
-                )}
-
-                {/* Term tabs */}
-                {selSkill && (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, flexShrink: 0 }}>
-                      Recording for:
-                    </span>
-                    {['T1', 'T2', 'T3'].map(t => (
-                      <div key={t} className={`term-tab ${term === t ? 'active' : ''}`} onClick={() => setTerm(t)}>
-                        {t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3'}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Activities table */}
-                {selSkill && (
-                  <div className="glass" style={{ borderRadius: 12, padding: '4px 14px', marginBottom: 14 }}>
-                    {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
-                      <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
-                        Activity
-                      </div>
-                      <div style={{ width: 80, textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
-                        Count
-                      </div>
-                      {LEVELS.map(l => (
-                        <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
-                      ))}
+                ) : skillGroups.map(group => (
+                  <div key={group.skill.id}>
+                    {/* Skill subheading — replaces the old skill dropdown */}
+                    <div style={{
+                      fontSize: 11, fontWeight: 800, color: '#2a7a74', textTransform: 'uppercase',
+                      letterSpacing: .8, padding: '12px 0 6px',
+                    }}>
+                      {group.skill.name}
                     </div>
 
-                    {activities.length === 0 ? (
-                      <div style={{ padding: '16px 0', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
+                    {group.activities.length === 0 ? (
+                      <div style={{ padding: '10px 0', fontSize: 12, color: '#A0AEC0' }}>
                         No activities under this skill. Add them in Curriculum.
                       </div>
-                    ) : activities.map(act => {
+                    ) : group.activities.map(act => {
                       const curr        = levels[act.id]
                       const existingRec = existing[act.id]
                       const totalSoFar  = existingRec?.totalCount || 0
@@ -364,77 +400,82 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                       )
                     })}
                   </div>
-                )}
+                ))}
+              </div>
+            )}
 
-                {/* Teacher note */}
-                {selSkill && (
-                  <div>
-                    {/* Month picker for observation */}
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 10 }}>
-                      <div style={{ flex: 1 }}>
-                        <label className="form-label">Observation Month</label>
-                        <input type="month" className="form-input"
-                          value={selectedMonth}
-                          onChange={e => setSelectedMonth(e.target.value)}
-                          style={{ maxWidth: 180 }} />
-                      </div>
-                    </div>
+            {/* Teacher note */}
+            {selCategory && (
+              <div>
+                {/* Month picker for observation */}
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label className="form-label">Observation Month</label>
+                    <input type="month" className="form-input"
+                      value={selectedMonth}
+                      onChange={e => setSelectedMonth(e.target.value)}
+                      style={{ maxWidth: 180 }} />
+                  </div>
+                </div>
 
-                    {/* Past observations dropdown */}
-                    {pastNotes.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        <label className="form-label">Previous Observations</label>
-                        <select className="form-select"
-                          onChange={e => {
-                            const selected = pastNotes.find(n => n.id === e.target.value)
-                            if (selected) setNote(selected.note)
-                          }}
-                          defaultValue="">
-                          <option value="">Select a past month to view...</option>
-                          {pastNotes.map(n => (
-                            <option key={n.id} value={n.id}>
-                              {n.month || 'No month'} — {(n.note || '').slice(0, 40)}...
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <label className="form-label">
-                      Observation for {selectedMonth}
-                      <span style={{ color: '#A0AEC0', textTransform: 'none', fontWeight: 400, marginLeft: 4, fontSize: 11 }}>(optional)</span>
-                    </label>
-                    <textarea className="form-textarea" rows={3}
-                      placeholder="Add your observations for this month..."
-                      value={note} onChange={e => setNote(e.target.value)}
-                      style={{ resize: 'vertical' }} />
-                    <div className="ai-note-box">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                        <span style={{ fontSize: 14 }}>🤖</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#2a7a74', textTransform: 'uppercase', letterSpacing: .8 }}>AI Report Note</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.5 }}>
-                        Your note will be used by AI to generate the narrative paragraph in the report card.
-                      </div>
-                    </div>
+                {/* Past observations dropdown */}
+                {pastNotes.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <label className="form-label">Previous Observations</label>
+                    <select className="form-select"
+                      onChange={e => {
+                        const selected = pastNotes.find(n => n.id === e.target.value)
+                        if (selected) setNote(selected.note)
+                      }}
+                      defaultValue="">
+                      <option value="">Select a past month to view...</option>
+                      {pastNotes.map(n => (
+                        <option key={n.id} value={n.id}>
+                          {n.month || 'No month'} — {(n.note || '').slice(0, 40)}...
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
 
-                {/* Save */}
-                {selSkill && (
-                  <div style={{ marginTop: 16 }}>
-                    {saveError && (
-                      <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>⚠️ {saveError}</div>
-                    )}
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-                      <button className="btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving}>
-                        {saving ? 'Saving…' : 'Save Progress'}
-                      </button>
-                    </div>
+                <label className="form-label">
+                  Observation for {selectedMonth}
+                  <span style={{ color: '#A0AEC0', textTransform: 'none', fontWeight: 400, marginLeft: 4, fontSize: 11 }}>(optional)</span>
+                </label>
+                <textarea className="form-textarea" rows={3}
+                  placeholder="Add your observations for this month..."
+                  value={note} onChange={e => setNote(e.target.value)}
+                  style={{ resize: 'vertical' }} />
+                <div className="ai-note-box">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                    <span style={{ fontSize: 14 }}>🤖</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#2a7a74', textTransform: 'uppercase', letterSpacing: .8 }}>AI Report Note</span>
                   </div>
+                  <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.5 }}>
+                    Your note will be used by AI to generate the narrative paragraph in the report card.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Save — FIX 3: saving no longer closes the modal by default.
+                "Save" keeps it open so the teacher can pick another subject/category
+                for the same student. "Save & Close" or the × does the closing. */}
+            {selCategory && (
+              <div style={{ marginTop: 16 }}>
+                {saveError && (
+                  <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>⚠️ {saveError}</div>
                 )}
-              </>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+                  <button className="btn-primary" style={{ flex: 2 }} onClick={() => handleSave(false)} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button className="btn-peach" style={{ flex: 2 }} onClick={() => handleSave(true)} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save & Close'}
+                  </button>
+                </div>
+              </div>
             )}
           </>
         )}

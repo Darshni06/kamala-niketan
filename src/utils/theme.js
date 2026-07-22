@@ -225,6 +225,40 @@ input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
   border-radius: 10px; padding: 12px 16px; color: #276749; font-size: 13px;
 }
 
+.plan-chip {
+  display: block; border-radius: 8px; padding: 4px 7px; margin-bottom: 4px;
+  font-size: 11px; line-height: 1.35; cursor: default;
+}
+.plan-chip:last-child { margin-bottom: 0; }
+.plan-chip .plan-chip-status {
+  display: inline-block; font-weight: 800; font-size: 10px;
+  border-radius: 5px; padding: 1px 5px; margin-top: 2px;
+}
+
+.wp-table-scroll { overflow: auto; border-radius: 12px; border: 1px solid #EDF2F7; }
+.wp-table { border-collapse: collapse; width: 100%; min-width: 640px; }
+.wp-table th, .wp-table td { border: 1px solid #EDF2F7; vertical-align: top; }
+.wp-table thead th {
+  position: sticky; top: 0; background: #F7FAFC; z-index: 2;
+  font-size: 11px; font-weight: 700; color: #4A5568; padding: 10px 12px; text-align: left; white-space: nowrap;
+}
+.wp-table tbody th {
+  position: sticky; left: 0; background: #FAFAFA; z-index: 1;
+  font-size: 11px; font-weight: 700; color: #4A5568; padding: 8px 12px; white-space: nowrap; text-align: left;
+}
+.wp-table td { padding: 6px 8px; min-width: 150px; }
+
+.view-mode-tab { padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all .15s; }
+.view-mode-tab.active { background: #3BBFB2; color: white; }
+.view-mode-tab:not(.active) { color: #718096; border: 1.5px solid #E2E8F0; }
+.view-mode-tab:not(.active):hover { border-color: #3BBFB2; color: #3BBFB2; }
+
+.checkbox-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+  cursor: pointer; font-size: 13px; color: #4A5568; transition: background .15s;
+}
+.checkbox-row:hover { background: rgba(59,191,178,.06); }
+
 @media (max-width: 900px) {
   .sidebar { width: 60px; }
   .sidebar .nav-label, .sidebar .brand-text, .sidebar .user-info { display: none; }

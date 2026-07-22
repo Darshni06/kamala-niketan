@@ -54,6 +54,8 @@ export default function ReportsPage({ role }) {
   const [loading,      setLoading]      = useState(true)
   const [exportingObs, setExportingObs] = useState(false)
   const [drillSubject, setDrillSubject] = useState(null)
+  const [drillCategory, setDrillCategory] = useState(null)
+  const [drillActivity, setDrillActivity] = useState(null)
 
   useEffect(() => {
     const load = async () => {
@@ -230,95 +232,179 @@ export default function ReportsPage({ role }) {
     if (graphType === 'heatmap') {
       if (heatData.length === 0) return <EmptyChart message="No data yet. Log some progress first." />
 
-      const getCatName = r => r.category_name || r.categoryName || ''
+      const getSubjName = r => r.subject_name  || r.subjectName  || ''
+      const getCatName  = r => r.category_name || r.categoryName || ''
+      const getActName  = r => r.activity_name || r.activityName || ''
+      const getStudId   = r => r.student_id    || r.studentId
+      const getStudentName = (id) => {
+        const s = students.find(x => x.id === id) || allStudents.find(x => x.id === id)
+        return s ? s.name : 'Unknown student'
+      }
 
-      const isDrilling = !!drillSubject
-      const tableRows = isDrilling
-        ? (() => {
-            const catNames = [...new Set(
-              records
-                .filter(r =>
-                  (r.subject_name || r.subjectName) === drillSubject &&
-                  (gradeFilter === 'All' || r.grade === gradeFilter) &&
-                  (termFilter  === 'All' || r.term  === termFilter)
-                )
-                .map(getCatName)
-            )].filter(Boolean)
+      // filters (grade/term) are already baked into `records`, so drill filters just narrow by subject/category/activity on top of that
+      const drillLevel = drillActivity ? 3 : drillCategory ? 2 : drillSubject ? 1 : 0
 
-            return catNames.map(cat => {
-              const cRecs = records.filter(r =>
-                (r.subject_name || r.subjectName) === drillSubject &&
-                getCatName(r) === cat &&
-                (gradeFilter === 'All' || r.grade === gradeFilter) &&
-                (termFilter  === 'All' || r.term  === termFilter)
-              )
-              const row = { label: cat }
-              ;['M','A','R','P'].forEach(l => { row[l] = cRecs.filter(r => r.level === l).length })
-              return row
-            })
-          })()
-        : heatData.map(d => ({ ...d, label: d.subject }))
+      let tableRows = []
+      let studentCols = null // only populated at drillLevel 3
 
-      const maxVal = Math.max(...tableRows.flatMap(r => ['M','A','R','P'].map(l => r[l])), 1)
+      if (drillLevel === 0) {
+        tableRows = heatData.map(d => ({ ...d, label: d.subject }))
+      } else if (drillLevel === 1) {
+        const catNames = [...new Set(
+          records.filter(r => getSubjName(r) === drillSubject).map(getCatName)
+        )].filter(Boolean)
+        tableRows = catNames.map(cat => {
+          const cRecs = records.filter(r => getSubjName(r) === drillSubject && getCatName(r) === cat)
+          const row = { label: cat, fullName: cat }
+          ;['M','A','R','P'].forEach(l => { row[l] = cRecs.filter(r => r.level === l).length })
+          return row
+        })
+      } else if (drillLevel === 2) {
+        const actNames = [...new Set(
+          records
+            .filter(r => getSubjName(r) === drillSubject && getCatName(r) === drillCategory)
+            .map(getActName)
+        )].filter(Boolean)
+        tableRows = actNames.map(act => {
+          const aRecs = records.filter(r =>
+            getSubjName(r) === drillSubject && getCatName(r) === drillCategory && getActName(r) === act
+          )
+          const row = { label: act, fullName: act }
+          ;['M','A','R','P'].forEach(l => { row[l] = aRecs.filter(r => r.level === l).length })
+          return row
+        })
+      } else {
+        // drillLevel === 3 — show the students sitting at each stage (pram) for this activity
+        const actRecs = records.filter(r =>
+          getSubjName(r) === drillSubject && getCatName(r) === drillCategory && getActName(r) === drillActivity
+        )
+        studentCols = ['M','A','R','P'].map(l => ({
+          level: l,
+          names: [...new Set(actRecs.filter(r => r.level === l).map(r => getStudentName(getStudId(r))))].sort(),
+        }))
+      }
+
+      const maxVal = drillLevel === 3
+        ? 1
+        : Math.max(...tableRows.flatMap(r => ['M','A','R','P'].map(l => r[l])), 1)
+
+      const goBack = () => {
+        if (drillActivity)      setDrillActivity(null)
+        else if (drillCategory) setDrillCategory(null)
+        else if (drillSubject)  setDrillSubject(null)
+      }
+
+      const headerLabel =
+        drillLevel === 3 ? `${drillActivity} — Students by Stage` :
+        drillLevel === 2 ? `${drillCategory} — Activity Breakdown` :
+        drillLevel === 1 ? `${drillSubject} — Category Breakdown` :
+        'Subject Heatmap'
+
+      const subLabel =
+        drillLevel === 3 ? 'Click Back to return to activities' :
+        drillLevel === 2 ? 'Click an activity row to see students at each stage' :
+        drillLevel === 1 ? 'Click a category row to drill into its activities' :
+        'Click a subject row to drill into its categories'
+
+      const colHeaderLabel =
+        drillLevel === 2 ? 'Activity (click to drill)' :
+        drillLevel === 1 ? 'Category (click to drill)' :
+        'Subject (click to drill)'
+
+      const handleRowClick = (row) => {
+        const val = row.fullName || row.label
+        if (drillLevel === 0) setDrillSubject(val)
+        else if (drillLevel === 1) setDrillCategory(val)
+        else if (drillLevel === 2) setDrillActivity(val)
+      }
 
       return (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-            {isDrilling && (
-              <button className="btn-ghost" style={{ padding: '4px 12px', fontSize: 12 }}
-                onClick={() => setDrillSubject(null)}>
-                ← Back to Subjects
+            {drillLevel > 0 && (
+              <button className="btn-ghost" style={{ padding: '4px 12px', fontSize: 12 }} onClick={goBack}>
+                ← Back
               </button>
             )}
-            <div style={{ fontWeight: 600, color: '#2D3748' }}>
-              {isDrilling ? `${drillSubject} — Category Breakdown` : 'Subject Heatmap'}
-            </div>
+            <div style={{ fontWeight: 600, color: '#2D3748' }}>{headerLabel}</div>
           </div>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            {isDrilling ? 'Click Back to return to subject view' : 'Click a subject row to drill into its categories'}
+            {subLabel}
             {gradeFilter !== 'All' ? ` · ${gradeFilter}` : ''}{termFilter !== 'All' ? ` · ${termFilter}` : ''}
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', fontSize: 11, color: '#718096', paddingBottom: 10, fontWeight: 700, paddingRight: 16 }}>
-                    {isDrilling ? 'Category' : 'Subject (click to drill)'}
-                  </th>
-                  {['M','A','R','P'].map(l => (
-                    <th key={l} style={{ textAlign: 'center', fontSize: 12, color: LEVEL_COLORS[l], paddingBottom: 10, fontWeight: 800, width: 80 }}>
-                      {l}<br/><span style={{ fontWeight: 400, fontSize: 10, color: '#A0AEC0' }}>{LEVEL_FULL[l]}</span>
+
+          {drillLevel === 3 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+              {studentCols.map(({ level: l, names }) => (
+                <div key={l} style={{
+                  border: `1.5px solid ${LEVEL_COLORS[l]}44`, borderRadius: 12, padding: 12,
+                  background: `${LEVEL_COLORS[l]}0d`,
+                }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 800, color: LEVEL_COLORS[l], marginBottom: 8,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span>{l} — {LEVEL_FULL[l]}</span>
+                    <span style={{
+                      fontSize: 11, background: LEVEL_COLORS[l], color: 'white',
+                      borderRadius: 10, padding: '1px 8px',
+                    }}>{names.length}</span>
+                  </div>
+                  {names.length === 0 ? (
+                    <div style={{ fontSize: 11, color: '#CBD5E0' }}>No students at this stage</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {names.map(n => (
+                        <div key={n} style={{ fontSize: 12, color: '#4A5568' }}>{n}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', fontSize: 11, color: '#718096', paddingBottom: 10, fontWeight: 700, paddingRight: 16 }}>
+                      {colHeaderLabel}
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #F7FAFC', cursor: isDrilling ? 'default' : 'pointer' }}
-                    onClick={() => !isDrilling && setDrillSubject(row.fullName || row.label)}>
-                    <td style={{ fontSize: 12, color: isDrilling ? '#4A5568' : TEAL, padding: '8px 16px 8px 0', fontWeight: 500, textDecoration: isDrilling ? 'none' : 'underline dotted' }}>
-                      {row.label}
-                    </td>
-                    {['M','A','R','P'].map(l => {
-                      const v  = row[l] || 0
-                      const op = v === 0 ? 1 : Math.min(0.95, 0.25 + (v / maxVal) * 0.7)
-                      return (
-                        <td key={l} style={{ textAlign: 'center', padding: 4 }}>
-                          <div style={{
-                            borderRadius: 8, padding: '8px 0', fontSize: 13, fontWeight: 700,
-                            color:      v === 0 ? '#CBD5E0' : 'white',
-                            background: v === 0 ? '#F7FAFC' : LEVEL_COLORS[l],
-                            opacity:    op,
-                            border:     v === 0 ? '1px solid #EDF2F7' : 'none',
-                          }}>{v}</div>
-                        </td>
-                      )
-                    })}
+                    {['M','A','R','P'].map(l => (
+                      <th key={l} style={{ textAlign: 'center', fontSize: 12, color: LEVEL_COLORS[l], paddingBottom: 10, fontWeight: 800, width: 80 }}>
+                        {l}<br/><span style={{ fontWeight: 400, fontSize: 10, color: '#A0AEC0' }}>{LEVEL_FULL[l]}</span>
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {tableRows.map((row, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #F7FAFC', cursor: 'pointer' }}
+                      onClick={() => handleRowClick(row)}>
+                      <td style={{ fontSize: 12, color: TEAL, padding: '8px 16px 8px 0', fontWeight: 500, textDecoration: 'underline dotted' }}>
+                        {row.label}
+                      </td>
+                      {['M','A','R','P'].map(l => {
+                        const v  = row[l] || 0
+                        const op = v === 0 ? 1 : Math.min(0.95, 0.25 + (v / maxVal) * 0.7)
+                        return (
+                          <td key={l} style={{ textAlign: 'center', padding: 4 }}>
+                            <div style={{
+                              borderRadius: 8, padding: '8px 0', fontSize: 13, fontWeight: 700,
+                              color:      v === 0 ? '#CBD5E0' : 'white',
+                              background: v === 0 ? '#F7FAFC' : LEVEL_COLORS[l],
+                              opacity:    op,
+                              border:     v === 0 ? '1px solid #EDF2F7' : 'none',
+                            }}>{v}</div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <ChartLegend />
         </div>
       )
@@ -363,7 +449,7 @@ export default function ReportsPage({ role }) {
         action={
           role === 'admin' && (
             <select className="form-select" style={{ width: 'auto', minWidth: 150 }}
-              value={classFilter} onChange={e => { setClassFilter(e.target.value); setDrillSubject(null) }}>
+              value={classFilter} onChange={e => { setClassFilter(e.target.value); setDrillSubject(null); setDrillCategory(null); setDrillActivity(null) }}>
               <option value="All">All Classes</option>
               {CLASSES.map(c => <option key={c}>{c}</option>)}
             </select>
@@ -380,7 +466,7 @@ export default function ReportsPage({ role }) {
           {GRAPH_TYPES.map(g => (
             <button key={g.id}
               className={`graph-type-btn ${graphType === g.id ? 'active' : ''}`}
-              onClick={() => { setGraphType(g.id); setDrillSubject(null) }}>
+              onClick={() => { setGraphType(g.id); setDrillSubject(null); setDrillCategory(null); setDrillActivity(null) }}>
               <span style={{ fontSize: 22 }}>{g.icon}</span>
               <span>{g.label}</span>
             </button>

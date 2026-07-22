@@ -513,7 +513,9 @@ export default function ReportsPage({ role }) {
                     }
                   }
                   const { data: notes } = await q
-                  exportObservationsToExcel(notes || [], 'All_Students')
+                  const studentsById = {}
+                  allStudents.forEach(s => { studentsById[s.id] = { name: s.name, grade: s.grade } })
+                  exportObservationsToExcel(notes || [], 'All_Students', studentsById)
                 } catch (e) { console.error(e) }
                 finally { setExportingObs(false) }
               }}>

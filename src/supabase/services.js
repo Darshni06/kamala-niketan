@@ -232,6 +232,29 @@ export const getActivitiesBySkill = async (skillId) => {
   return data.map(a => ({ ...a, skillId: a.skill_id }))
 }
 
+// Flat activity list for a subject — used by Weekly Plan, where teachers only
+// ever pick a Subject + Activity (no Category/Skill step). Category/Skill are
+// still resolved and carried along quietly so weekly_plans rows stay fully
+// consistent with the rest of the curriculum data.
+export const getActivitiesBySubject = async (subjectId) => {
+  const categories = await getCategoriesBySubject(subjectId)
+  const results = []
+  for (const cat of categories) {
+    const skills = await getSkillsByCategory(cat.id)
+    for (const sk of skills) {
+      const acts = await getActivitiesBySkill(sk.id)
+      acts.forEach(a => results.push({
+        ...a,
+        skillId:      sk.id,
+        skillName:    sk.name,
+        categoryId:   cat.id,
+        categoryName: cat.name,
+      }))
+    }
+  }
+  return results
+}
+
 export const getCurriculumForGrade = async (grade) => {
   const subjects = await getSubjectsByGrade(grade)
   for (const sub of subjects) {
@@ -427,6 +450,8 @@ export const saveProgressRecord = async (data) => {
     .eq('term',        data.term)
     .maybeSingle()  // use maybeSingle instead of single — doesn't error when no row found
 
+  let savedId
+
   if (existing) {
     const newCount      = (existing.total_practice_count || 0) + (Number(data.practiceCount) || 0)
     const existingDates = Array.isArray(existing.dates) ? existing.dates : []
@@ -446,7 +471,7 @@ export const saveProgressRecord = async (data) => {
       })
       .eq('id', existing.id)
     if (error) throw error
-    return existing.id
+    savedId = existing.id
   } else {
     const { data: inserted, error } = await supabase
       .from('progress')
@@ -472,8 +497,26 @@ export const saveProgressRecord = async (data) => {
       })
       .select().single()
     if (error) throw error
-    return inserted.id
+    savedId = inserted.id
   }
+
+  // ── Weekly Plan sync ──────────────────────────────────────────────────────
+  // If this student+activity was assigned in the Weekly Plan for a date range
+  // covering `logDate`, flip it from PL → PR on first log, then bump the
+  // practice count (PR → P-1 → P-2 …) on every repeat. This never throws —
+  // if the weekly_plans table doesn't exist yet, or the update fails for any
+  // reason, the progress save above has already succeeded and is unaffected.
+  try {
+    await syncWeeklyPlanOnLog({
+      studentId:  data.studentId,
+      activityId: data.activityId,
+      logDate,
+    })
+  } catch (syncErr) {
+    console.warn('Weekly plan sync skipped:', syncErr?.message || syncErr)
+  }
+
+  return savedId
 }
 
 export const getProgressByStudent = async (studentId) => {
@@ -593,4 +636,158 @@ export const getObservationsByStudent = async (studentId) => {
     .order('month', { ascending: true })
   if (error) return []
   return data
+}
+
+// ─── Student Groups (Weekly Plan) ──────────────────────────────────────────────
+// A reusable named set of students within a class, so teachers can assign a
+// week's activity to "Group A" instead of re-picking the same students
+// every time. Purely a convenience layer on top of weekly_plans, which still
+// stores one row per student for accurate per-student status/practice sync.
+
+export const getGroupsByClass = async (classId) => {
+  const { data, error } = await supabase
+    .from('student_groups').select('*').eq('class_id', classId).order('name')
+  if (error) throw error
+  return data.map(g => ({ ...g, studentIds: g.student_ids || [] }))
+}
+
+export const createGroup = async (classId, name, studentIds, createdBy) => {
+  const { data, error } = await supabase
+    .from('student_groups')
+    .insert({ class_id: classId, name, student_ids: studentIds, created_by: createdBy || null })
+    .select().single()
+  if (error) throw error
+  return { ...data, studentIds: data.student_ids || [] }
+}
+
+export const updateGroup = async (id, { name, studentIds }) => {
+  const { error } = await supabase
+    .from('student_groups')
+    .update({ name, student_ids: studentIds })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export const deleteGroup = async (id) => {
+  const { error } = await supabase.from('student_groups').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ─── Weekly Plan ────────────────────────────────────────────────────────────────
+// One row per (student, activity, date range). Teachers only ever choose
+// Subject + Activity — Category/Skill are resolved behind the scenes from
+// getActivitiesBySubject() so reports/analytics elsewhere stay consistent.
+//
+// Status is derived from `presentation_count`, kept in sync automatically by
+// saveProgressRecord()'s call to syncWeeklyPlanOnLog() every time a teacher
+// logs progress for that student+activity within the plan's date range:
+//   0            → "PL" (planned, not yet presented)
+//   1            → "PR" (presented once)
+//   2, 3, 4 ...  → "P-1", "P-2", "P-3" ... (practiced again after presenting)
+
+const mapWeeklyPlanRow = (p) => ({
+  ...p,
+  teacherId:         p.teacher_id,
+  classId:           p.class_id,
+  subjectId:         p.subject_id,
+  subjectName:       p.subject_name,
+  categoryId:        p.category_id,
+  categoryName:      p.category_name,
+  skillId:           p.skill_id,
+  skillName:         p.skill_name,
+  activityId:        p.activity_id,
+  activityName:      p.activity_name,
+  studentId:         p.student_id,
+  studentName:       p.student_name,
+  groupId:           p.group_id,
+  groupName:         p.group_name,
+  fromDate:          p.from_date,
+  toDate:            p.to_date,
+  presentationCount: p.presentation_count || 0,
+  batchId:           p.batch_id,
+})
+
+// Creates one weekly_plans row per assignee, all sharing the same batch_id
+// so the whole assignment can be displayed/removed as a single unit later.
+export const addWeeklyPlan = async ({
+  teacherId, classId, grade,
+  subjectId, subjectName, categoryId, categoryName, skillId, skillName,
+  activityId, activityName,
+  assignees,              // [{ id, name }]
+  groupId, groupName,
+  fromDate, toDate,
+}) => {
+  const batchId = crypto.randomUUID()
+  const rows = assignees.map(s => ({
+    batch_id:      batchId,
+    teacher_id:    teacherId || null,
+    class_id:      classId,
+    grade,
+    subject_id:    subjectId    || null,
+    subject_name:  subjectName  || '',
+    category_id:   categoryId   || null,
+    category_name: categoryName || '',
+    skill_id:      skillId      || null,
+    skill_name:    skillName    || '',
+    activity_id:   activityId,
+    activity_name: activityName || '',
+    student_id:    s.id,
+    student_name:  s.name || '',
+    group_id:      groupId   || null,
+    group_name:    groupName || '',
+    from_date:     fromDate,
+    to_date:       toDate,
+    status:        'PL',
+    presentation_count: 0,
+  }))
+  const { error } = await supabase.from('weekly_plans').insert(rows)
+  if (error) throw error
+  return batchId
+}
+
+export const getWeeklyPlansByClass = async (classId) => {
+  const { data, error } = await supabase
+    .from('weekly_plans').select('*').eq('class_id', classId).order('from_date')
+  if (error) throw error
+  return data.map(mapWeeklyPlanRow)
+}
+
+// Admin view — every class at once
+export const getAllWeeklyPlans = async () => {
+  const { data, error } = await supabase
+    .from('weekly_plans').select('*').order('class_id').order('from_date')
+  if (error) throw error
+  return data.map(mapWeeklyPlanRow)
+}
+
+// Removes an entire assignment batch (every student it was assigned to)
+export const deleteWeeklyPlanBatch = async (batchId) => {
+  const { error } = await supabase.from('weekly_plans').delete().eq('batch_id', batchId)
+  if (error) throw error
+}
+
+// Called from saveProgressRecord — finds any weekly_plans row for this
+// student+activity whose date range covers the logged date, and advances it.
+export const syncWeeklyPlanOnLog = async ({ studentId, activityId, logDate }) => {
+  const { data: plans, error } = await supabase
+    .from('weekly_plans')
+    .select('id, presentation_count')
+    .eq('student_id',  studentId)
+    .eq('activity_id', activityId)
+    .lte('from_date', logDate)
+    .gte('to_date',   logDate)
+  if (error) throw error
+  if (!plans || plans.length === 0) return
+
+  for (const p of plans) {
+    const { error: updErr } = await supabase
+      .from('weekly_plans')
+      .update({
+        status:             'PR',
+        presentation_count: (p.presentation_count || 0) + 1,
+        updated_at:          new Date().toISOString(),
+      })
+      .eq('id', p.id)
+    if (updErr) throw updErr
+  }
 }
