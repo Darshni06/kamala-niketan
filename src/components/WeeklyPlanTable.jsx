@@ -23,7 +23,7 @@ export default function WeeklyPlanTable({ classId }) {
   const [loading,  setLoading]  = useState(true)
 
   const [gradeFilter,   setGradeFilter]   = useState('')
-  const [subjectFilter, setSubjectFilter] = useState('')
+  const [subjectFilter, setSubjectFilter] = useState('ALL')
   const [viewMode,      setViewMode]      = useState('week') // week | month | custom
   const [anchor,        setAnchor]        = useState(todayStr())
   const [customFrom,    setCustomFrom]    = useState(todayStr())
@@ -53,7 +53,7 @@ export default function WeeklyPlanTable({ classId }) {
 
   useEffect(() => {
     if (!gradeFilter) return
-    setSubjectFilter('')
+    setSubjectFilter('ALL')
     getSubjectsByGrade(gradeFilter).then(setSubjects)
   }, [gradeFilter])
 
@@ -81,8 +81,8 @@ export default function WeeklyPlanTable({ classId }) {
   )
 
   const relevantPlans = useMemo(
-    () => subjectFilter ? plans.filter(p => p.subjectId === subjectFilter) : [],
-    [plans, subjectFilter]
+    () => plans.filter(p => p.grade === gradeFilter && (subjectFilter === 'ALL' || p.subjectId === subjectFilter)),
+    [plans, subjectFilter, gradeFilter]
   )
 
   const cellPlans = (studentId, date) =>
@@ -90,7 +90,7 @@ export default function WeeklyPlanTable({ classId }) {
 
   const handleExport = () => {
     const visible = relevantPlans.filter(p => p.fromDate <= rangeTo && p.toDate >= rangeFrom)
-    const subjName = subjects.find(s => s.id === subjectFilter)?.name || 'Subject'
+    const subjName = subjectFilter === 'ALL' ? 'All_Subjects' : (subjects.find(s => s.id === subjectFilter)?.name || 'Subject')
     exportWeeklyPlanToExcel(visible, `${classId}_${gradeFilter}_${subjName}_weekly_plan`)
   }
 
@@ -109,7 +109,7 @@ export default function WeeklyPlanTable({ classId }) {
         <div style={{ minWidth: 180 }}>
           <label className="form-label">Subject</label>
           <select className="form-select" value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)}>
-            <option value="">Select subject...</option>
+            <option value="ALL">All Subjects</option>
             {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
@@ -145,14 +145,12 @@ export default function WeeklyPlanTable({ classId }) {
 
         <div style={{ flex: 1 }} />
         <button className="btn-ghost" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
-          onClick={handleExport} disabled={!subjectFilter}>
+          onClick={handleExport} disabled={relevantPlans.length === 0}>
           📥 Export to Excel
         </button>
       </div>
 
-      {!subjectFilter ? (
-        <EmptyState icon="🗓️" message="Choose a grade and subject above to see the weekly plan." />
-      ) : gradeStudents.length === 0 ? (
+      {gradeStudents.length === 0 ? (
         <EmptyState icon="🎓" message={`No students found for ${gradeFilter}.`} />
       ) : (
         <div className="wp-table-scroll" style={{ maxHeight: 560 }}>
@@ -175,6 +173,11 @@ export default function WeeklyPlanTable({ classId }) {
                           <span style={{ fontSize: 11, color: '#CBD5E0' }}>—</span>
                         ) : cp.map(p => (
                           <div key={p.id} className="plan-chip" style={{ background: planStatusBg(p.presentationCount), color: '#2D3748' }}>
+                            {subjectFilter === 'ALL' && (
+                              <div style={{ fontSize: 9, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .4, marginBottom: 1 }}>
+                                {p.subjectName}
+                              </div>
+                            )}
                             {p.activityName}
                             <div>
                               <span className="plan-chip-status" style={{ background: planStatusColor(p.presentationCount), color: 'white' }}>
