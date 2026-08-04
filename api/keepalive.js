@@ -1,7 +1,7 @@
 // api/keepalive.js
-const { createClient } = require('@supabase/supabase-js')
+import { createClient } from '@supabase/supabase-js'
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.VITE_SUPABASE_ANON_KEY
