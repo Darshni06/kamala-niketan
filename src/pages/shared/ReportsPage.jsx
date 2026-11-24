@@ -11,6 +11,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 
+const NOT_LOGGED_COLOR = '#CBD5E0'
+
 function ChartLegend() {
   return (
     <div style={{ display: 'flex', gap: 14, marginTop: 18, flexWrap: 'wrap' }}>
@@ -20,6 +22,10 @@ function ChartLegend() {
           <span style={{ color: '#718096' }}>{l} — {LEVEL_FULL[l]}</span>
         </div>
       ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        <div style={{ width: 10, height: 10, borderRadius: 2, background: NOT_LOGGED_COLOR }} />
+        <span style={{ color: '#718096' }}>Not logged</span>
+      </div>
     </div>
   )
 }
@@ -31,6 +37,59 @@ function EmptyChart({ message = 'No data yet for the selected filters.' }) {
       <div style={{ fontSize: 14 }}>{message}</div>
     </div>
   )
+}
+
+// ─── Heatmap counting helpers ────────────────────────────────────────────────
+// The heatmap counts STUDENTS, never raw progress records. A student has many
+// records (one per activity per term), so counting records made every row add
+// up to far more than the class size. Rules used instead:
+//   1. Per student + activity, the most recent term's level is the current stage.
+//   2. Per student within a row (subject / category / activity), the stage is the
+//      most frequent level across that row's activities (ties go to the lower
+//      stage, i.e. the more cautious reading).
+//   3. Every student of the filtered class/grade appears in exactly one cell of
+//      each row: M, A, R, P, or "Not logged" — so each row always sums to the
+//      total number of students.
+const LEVEL_ORDER = ['M', 'A', 'R', 'P']
+const TERM_ORDER  = { T1: 1, T2: 2, T3: 3 }
+
+const getStudId   = r => r.student_id    || r.studentId
+const getSubjName = r => r.subject_name  || r.subjectName  || ''
+const getCatName  = r => r.category_name || r.categoryName || ''
+const getActName  = r => r.activity_name || r.activityName || ''
+
+function resolveStudentLevels(recs) {
+  const perActivity = {}
+  recs.forEach(r => {
+    const sid = getStudId(r)
+    if (!sid || !LEVEL_ORDER.includes(r.level)) return
+    const actKey = r.activity_id || r.activityId || getActName(r)
+    const key = sid + '||' + actKey
+    const t = TERM_ORDER[r.term] || 0
+    if (!perActivity[key] || t >= perActivity[key].t) perActivity[key] = { sid, t, level: r.level }
+  })
+
+  const tallies = {}
+  Object.values(perActivity).forEach(({ sid, level }) => {
+    if (!tallies[sid]) tallies[sid] = { M: 0, A: 0, R: 0, P: 0 }
+    tallies[sid][level]++
+  })
+
+  const result = {}
+  Object.entries(tallies).forEach(([sid, c]) => {
+    let best = null
+    LEVEL_ORDER.forEach(l => { if (best === null || c[l] > c[best]) best = l }) // strict ">" keeps the lower stage on a tie
+    result[sid] = best
+  })
+  return result
+}
+
+function buildHeatRow(recs, studentIds) {
+  const levels = resolveStudentLevels(recs.filter(r => studentIds.has(getStudId(r))))
+  const ids = { M: [], A: [], R: [], P: [], N: [] }
+  Object.entries(levels).forEach(([sid, l]) => ids[l].push(sid))
+  studentIds.forEach(sid => { if (!levels[sid]) ids.N.push(sid) })
+  return { M: ids.M.length, A: ids.A.length, R: ids.R.length, P: ids.P.length, N: ids.N.length, ids }
 }
 
 export default function ReportsPage({ role }) {
@@ -50,7 +109,6 @@ export default function ReportsPage({ role }) {
   const [termFilter,   setTermFilter]   = useState('All')
   const [allRecords,   setAllRecords]   = useState([])
   const [allStudents,  setAllStudents]  = useState([])
-  const [classCompData,setClassCompData]= useState([])
   const [loading,      setLoading]      = useState(true)
   const [exportingObs, setExportingObs] = useState(false)
   const [drillSubject, setDrillSubject] = useState(null)
@@ -72,19 +130,6 @@ export default function ReportsPage({ role }) {
         setAllRecords(recs)
         setAllStudents(studs)
 
-        // Class comparison — admin only, needs all records
-        if (role === 'admin') {
-          const allProg = recs
-          const classIds = [...new Set(allProg.map(r => r.class_id).filter(Boolean))].sort()
-          const weight = { M:1, A:2, R:3, P:4 }
-          const compData = classIds.map(cls => {
-            const clsRecs = allProg.filter(r => r.class_id === cls)
-            const total   = clsRecs.length || 1
-            const avg     = clsRecs.reduce((s,r) => s + (weight[r.level]||0), 0) / total
-            return { class: cls, avgScore: parseFloat(avg.toFixed(2)), total: clsRecs.length }
-          })
-          setClassCompData(compData)
-        }
       } catch (e) { console.error(e) }
       finally { setLoading(false) }
     }
@@ -106,35 +151,51 @@ export default function ReportsPage({ role }) {
 
   // ── Chart data ────────────────────────────────────────────────────────────
 
-  const studentData = students.slice(0, 10).map(s => {
-    const sRecs  = records.filter(r => r.student_id === s.id || r.studentId === s.id)
-    const counts = { name: s.name.split(' ')[0], M: 0, A: 0, R: 0, P: 0 }
-    sRecs.forEach(r => { if (counts[r.level] !== undefined) counts[r.level]++ })
-    return counts
-  }).filter(d => d.M + d.A + d.R + d.P > 0)
+  // Every chart below counts STUDENTS (each student once, at their current
+  // stage) — never raw progress records. See buildHeatRow() above.
+  const studentIds    = new Set(students.map(s => s.id))
+  const totalStudents = studentIds.size
 
+  const subjectNames = [...new Set(records.map(getSubjName))].filter(Boolean)
+  const heatData = subjectNames.map(subject => ({
+    subject: subject.length > 18 ? subject.slice(0, 17) + '…' : subject,
+    fullName: subject,
+    ...buildHeatRow(records.filter(r => getSubjName(r) === subject), studentIds),
+  }))
+
+  // Stacked bar — per subject, how many students sit at each stage
+  const stackedData = heatData
+
+  // Line — per term, how many students sit at each stage (grade filter applies,
+  // the term filter does not, since the chart itself is the term comparison)
   const termTrend = ['T1', 'T2', 'T3'].map(t => {
     const tRecs = allRecords.filter(r =>
       r.term === t && (gradeFilter === 'All' || r.grade === gradeFilter)
     )
-    const out = { term: t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3', M:0, A:0, R:0, P:0 }
-    tRecs.forEach(r => { if (out[r.level] !== undefined) out[r.level]++ })
-    return out
+    const row = buildHeatRow(tRecs, studentIds)
+    return { term: t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3',
+             M: row.M, A: row.A, R: row.R, P: row.P, N: row.N }
   })
 
-  const donutData = ['M','A','R','P'].map(l => ({
-    name: LEVEL_FULL[l],
-    value: records.filter(r => r.level === l).length,
-    color: LEVEL_COLORS[l],
-  })).filter(d => d.value > 0)
+  // Donut — overall, how many students sit at each stage
+  const overall = buildHeatRow(records, studentIds)
+  const donutData = [
+    ...['M','A','R','P'].map(l => ({ name: LEVEL_FULL[l], value: overall[l], color: LEVEL_COLORS[l] })),
+    { name: 'Not logged', value: overall.N, color: NOT_LOGGED_COLOR },
+  ].filter(d => d.value > 0)
 
-  const subjectNames = [...new Set(records.map(r => r.subject_name || r.subjectName))].filter(Boolean)
-  const heatData = subjectNames.map(subject => {
-    const sRecs = records.filter(r => (r.subject_name || r.subjectName) === subject)
-    const row   = { subject: subject.length > 18 ? subject.slice(0,17)+'…' : subject, fullName: subject }
-    ;['M','A','R','P'].forEach(l => { row[l] = sRecs.filter(r => r.level === l).length })
-    return row
-  })
+  // Class comparison — average stage across a class's students (M=1 … P=4)
+  const classCompData = useMemo(() => {
+    const weight = { M: 1, A: 2, R: 3, P: 4 }
+    const classIds = [...new Set(students.map(s => s.class_id || s.classId).filter(Boolean))].sort()
+    return classIds.map(cls => {
+      const ids    = new Set(students.filter(s => (s.class_id || s.classId) === cls).map(s => s.id))
+      const levels = resolveStudentLevels(records.filter(r => ids.has(getStudId(r))))
+      const stages = Object.values(levels)
+      const avg    = stages.length ? stages.reduce((sum, l) => sum + weight[l], 0) / stages.length : 0
+      return { class: cls, avgScore: parseFloat(avg.toFixed(2)), students: ids.size, logged: stages.length }
+    }).filter(c => c.logged > 0)
+  }, [students, records])
 
   // ── Render chart ──────────────────────────────────────────────────────────
 
@@ -142,23 +203,25 @@ export default function ReportsPage({ role }) {
     if (loading) return <Spinner center />
 
     if (graphType === 'stacked') {
-      if (studentData.length === 0) return <EmptyChart />
+      if (stackedData.length === 0) return <EmptyChart />
       return (
         <div>
-          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Student Level Distribution</div>
+          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Students at Each Level, by Subject</div>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            Records at each level per student {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''} {termFilter !== 'All' ? `· ${termFilter}` : ''}
+            Number of students at each level · each bar adds up to {totalStudents} student{totalStudents === 1 ? '' : 's'}
+            {gradeFilter !== 'All' ? ` · ${gradeFilter}` : ''} {termFilter !== 'All' ? ` · ${termFilter}` : ''}
           </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={studentData} margin={{ top: 0, right: 10, left: -20, bottom: 40 }}>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart data={stackedData} margin={{ top: 0, right: 10, left: -20, bottom: 50 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#EDF2F7" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" interval={0} />
-              <YAxis tick={{ fontSize: 11 }} />
+              <XAxis dataKey="subject" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" interval={0} />
+              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} domain={[0, Math.max(totalStudents, 1)]} />
               <Tooltip />
               <Bar dataKey="M" stackId="a" fill={LEVEL_COLORS.M} name={LEVEL_FULL.M} />
               <Bar dataKey="A" stackId="a" fill={LEVEL_COLORS.A} name={LEVEL_FULL.A} />
               <Bar dataKey="R" stackId="a" fill={LEVEL_COLORS.R} name={LEVEL_FULL.R} />
-              <Bar dataKey="P" stackId="a" fill={LEVEL_COLORS.P} name={LEVEL_FULL.P} radius={[4,4,0,0]} />
+              <Bar dataKey="P" stackId="a" fill={LEVEL_COLORS.P} name={LEVEL_FULL.P} />
+              <Bar dataKey="N" stackId="a" fill={NOT_LOGGED_COLOR} name="Not logged" radius={[4,4,0,0]} />
             </BarChart>
           </ResponsiveContainer>
           <ChartLegend />
@@ -173,18 +236,20 @@ export default function ReportsPage({ role }) {
         <div>
           <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Progress Over Terms</div>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            Level counts across Term 1, 2, 3 {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''}
+            Number of students at each level in Term 1, 2, 3 · out of {totalStudents} {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''}
           </div>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={termTrend} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#EDF2F7" />
               <XAxis dataKey="term" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} domain={[0, Math.max(totalStudents, 1)]} />
               <Tooltip />
               {['M','A','R','P'].map(l => (
                 <Line key={l} type="monotone" dataKey={l} stroke={LEVEL_COLORS[l]}
                   strokeWidth={2.5} dot={{ r: 5, fill: LEVEL_COLORS[l] }} name={LEVEL_FULL[l]} />
               ))}
+              <Line type="monotone" dataKey="N" stroke={NOT_LOGGED_COLOR} strokeDasharray="5 4"
+                strokeWidth={2} dot={{ r: 4, fill: NOT_LOGGED_COLOR }} name="Not logged" />
             </LineChart>
           </ResponsiveContainer>
           <ChartLegend />
@@ -199,7 +264,7 @@ export default function ReportsPage({ role }) {
         <div>
           <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Level Distribution</div>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            Share of records at each level {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''} {termFilter !== 'All' ? `· ${termFilter}` : ''}
+            Share of students at each level {gradeFilter !== 'All' ? `· ${gradeFilter}` : ''} {termFilter !== 'All' ? `· ${termFilter}` : ''}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
             <ResponsiveContainer width={200} height={200}>
@@ -208,7 +273,7 @@ export default function ReportsPage({ role }) {
                   dataKey="value" paddingAngle={2}>
                   {donutData.map((e,i) => <Cell key={i} fill={e.color} />)}
                 </Pie>
-                <Tooltip formatter={(v,n) => [v+' records', n]} />
+                <Tooltip formatter={(v,n) => [v + (v === 1 ? ' student' : ' students'), n]} />
               </PieChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -221,7 +286,7 @@ export default function ReportsPage({ role }) {
                 </div>
               ))}
               <div style={{ fontSize: 12, color: '#718096', marginTop: 4, borderTop: '1px solid #EDF2F7', paddingTop: 8 }}>
-                Total: {total} records
+                Total: {total} student{total === 1 ? '' : 's'}
               </div>
             </div>
           </div>
@@ -232,17 +297,16 @@ export default function ReportsPage({ role }) {
     if (graphType === 'heatmap') {
       if (heatData.length === 0) return <EmptyChart message="No data yet. Log some progress first." />
 
-      const getSubjName = r => r.subject_name  || r.subjectName  || ''
-      const getCatName  = r => r.category_name || r.categoryName || ''
-      const getActName  = r => r.activity_name || r.activityName || ''
-      const getStudId   = r => r.student_id    || r.studentId
       const getStudentName = (id) => {
         const s = students.find(x => x.id === id) || allStudents.find(x => x.id === id)
         return s ? s.name : 'Unknown student'
       }
 
-      // filters (grade/term) are already baked into `records`, so drill filters just narrow by subject/category/activity on top of that
       const drillLevel = drillActivity ? 3 : drillCategory ? 2 : drillSubject ? 1 : 0
+
+      const inSubject  = r => getSubjName(r) === drillSubject
+      const inCategory = r => inSubject(r) && getCatName(r) === drillCategory
+      const inActivity = r => inCategory(r) && getActName(r) === drillActivity
 
       let tableRows = []
       let studentCols = null // only populated at drillLevel 3
@@ -250,43 +314,27 @@ export default function ReportsPage({ role }) {
       if (drillLevel === 0) {
         tableRows = heatData.map(d => ({ ...d, label: d.subject }))
       } else if (drillLevel === 1) {
-        const catNames = [...new Set(
-          records.filter(r => getSubjName(r) === drillSubject).map(getCatName)
-        )].filter(Boolean)
-        tableRows = catNames.map(cat => {
-          const cRecs = records.filter(r => getSubjName(r) === drillSubject && getCatName(r) === cat)
-          const row = { label: cat, fullName: cat }
-          ;['M','A','R','P'].forEach(l => { row[l] = cRecs.filter(r => r.level === l).length })
-          return row
-        })
+        const catNames = [...new Set(records.filter(inSubject).map(getCatName))].filter(Boolean)
+        tableRows = catNames.map(cat => ({
+          label: cat, fullName: cat,
+          ...buildHeatRow(records.filter(r => inSubject(r) && getCatName(r) === cat), studentIds),
+        }))
       } else if (drillLevel === 2) {
-        const actNames = [...new Set(
-          records
-            .filter(r => getSubjName(r) === drillSubject && getCatName(r) === drillCategory)
-            .map(getActName)
-        )].filter(Boolean)
-        tableRows = actNames.map(act => {
-          const aRecs = records.filter(r =>
-            getSubjName(r) === drillSubject && getCatName(r) === drillCategory && getActName(r) === act
-          )
-          const row = { label: act, fullName: act }
-          ;['M','A','R','P'].forEach(l => { row[l] = aRecs.filter(r => r.level === l).length })
-          return row
-        })
+        const actNames = [...new Set(records.filter(inCategory).map(getActName))].filter(Boolean)
+        tableRows = actNames.map(act => ({
+          label: act, fullName: act,
+          ...buildHeatRow(records.filter(r => inCategory(r) && getActName(r) === act), studentIds),
+        }))
       } else {
-        // drillLevel === 3 — show the students sitting at each stage (pram) for this activity
-        const actRecs = records.filter(r =>
-          getSubjName(r) === drillSubject && getCatName(r) === drillCategory && getActName(r) === drillActivity
-        )
-        studentCols = ['M','A','R','P'].map(l => ({
+        const row = buildHeatRow(records.filter(inActivity), studentIds)
+        studentCols = [...LEVEL_ORDER, 'N'].map(l => ({
           level: l,
-          names: [...new Set(actRecs.filter(r => r.level === l).map(r => getStudentName(getStudId(r))))].sort(),
+          names: row.ids[l].map(getStudentName).sort(),
         }))
       }
 
-      const maxVal = drillLevel === 3
-        ? 1
-        : Math.max(...tableRows.flatMap(r => ['M','A','R','P'].map(l => r[l])), 1)
+      const colColor = l => (l === 'N' ? '#A0AEC0' : LEVEL_COLORS[l])
+      const colTitle = l => (l === 'N' ? 'Not logged' : LEVEL_FULL[l])
 
       const goBack = () => {
         if (drillActivity)      setDrillActivity(null)
@@ -328,30 +376,34 @@ export default function ReportsPage({ role }) {
             )}
             <div style={{ fontWeight: 600, color: '#2D3748' }}>{headerLabel}</div>
           </div>
-          <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
+          <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 6 }}>
             {subLabel}
             {gradeFilter !== 'All' ? ` · ${gradeFilter}` : ''}{termFilter !== 'All' ? ` · ${termFilter}` : ''}
+            {` · ${totalStudents} student${totalStudents === 1 ? '' : 's'}`}
+          </div>
+          <div style={{ fontSize: 11, color: '#A0AEC0', marginBottom: 20 }}>
+            Numbers are students, not records: each student is counted once per row, at their most common stage across that row's activities. Every row adds up to {totalStudents}.
           </div>
 
           {drillLevel === 3 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
               {studentCols.map(({ level: l, names }) => (
                 <div key={l} style={{
-                  border: `1.5px solid ${LEVEL_COLORS[l]}44`, borderRadius: 12, padding: 12,
-                  background: `${LEVEL_COLORS[l]}0d`,
+                  border: `1.5px solid ${colColor(l)}44`, borderRadius: 12, padding: 12,
+                  background: `${colColor(l)}0d`,
                 }}>
                   <div style={{
-                    fontSize: 12, fontWeight: 800, color: LEVEL_COLORS[l], marginBottom: 8,
+                    fontSize: 12, fontWeight: 800, color: colColor(l), marginBottom: 8,
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}>
-                    <span>{l} — {LEVEL_FULL[l]}</span>
+                    <span>{l === 'N' ? 'Not logged' : `${l} — ${colTitle(l)}`}</span>
                     <span style={{
-                      fontSize: 11, background: LEVEL_COLORS[l], color: 'white',
+                      fontSize: 11, background: colColor(l), color: 'white',
                       borderRadius: 10, padding: '1px 8px',
                     }}>{names.length}</span>
                   </div>
                   {names.length === 0 ? (
-                    <div style={{ fontSize: 11, color: '#CBD5E0' }}>No students at this stage</div>
+                    <div style={{ fontSize: 11, color: '#CBD5E0' }}>No students</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                       {names.map(n => (
@@ -364,15 +416,15 @@ export default function ReportsPage({ role }) {
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 400 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: 'left', fontSize: 11, color: '#718096', paddingBottom: 10, fontWeight: 700, paddingRight: 16 }}>
                       {colHeaderLabel}
                     </th>
-                    {['M','A','R','P'].map(l => (
-                      <th key={l} style={{ textAlign: 'center', fontSize: 12, color: LEVEL_COLORS[l], paddingBottom: 10, fontWeight: 800, width: 80 }}>
-                        {l}<br/><span style={{ fontWeight: 400, fontSize: 10, color: '#A0AEC0' }}>{LEVEL_FULL[l]}</span>
+                    {[...LEVEL_ORDER, 'N'].map(l => (
+                      <th key={l} style={{ textAlign: 'center', fontSize: 12, color: colColor(l), paddingBottom: 10, fontWeight: 800, width: 80 }}>
+                        {l === 'N' ? '—' : l}<br/><span style={{ fontWeight: 400, fontSize: 10, color: '#A0AEC0' }}>{colTitle(l)}</span>
                       </th>
                     ))}
                   </tr>
@@ -384,15 +436,15 @@ export default function ReportsPage({ role }) {
                       <td style={{ fontSize: 12, color: TEAL, padding: '8px 16px 8px 0', fontWeight: 500, textDecoration: 'underline dotted' }}>
                         {row.label}
                       </td>
-                      {['M','A','R','P'].map(l => {
+                      {[...LEVEL_ORDER, 'N'].map(l => {
                         const v  = row[l] || 0
-                        const op = v === 0 ? 1 : Math.min(0.95, 0.25 + (v / maxVal) * 0.7)
+                        const op = v === 0 ? 1 : Math.min(0.95, 0.25 + (v / Math.max(totalStudents, 1)) * 0.7)
                         return (
                           <td key={l} style={{ textAlign: 'center', padding: 4 }}>
                             <div style={{
                               borderRadius: 8, padding: '8px 0', fontSize: 13, fontWeight: 700,
                               color:      v === 0 ? '#CBD5E0' : 'white',
-                              background: v === 0 ? '#F7FAFC' : LEVEL_COLORS[l],
+                              background: v === 0 ? '#F7FAFC' : colColor(l),
                               opacity:    op,
                               border:     v === 0 ? '1px solid #EDF2F7' : 'none',
                             }}>{v}</div>
@@ -411,12 +463,13 @@ export default function ReportsPage({ role }) {
     }
 
     if (graphType === 'classcomp') {
-      if (classCompData.length === 0) return <EmptyChart message="No class data yet. Logs must exist across multiple classes." />
+      if (classCompData.length === 0) return <EmptyChart message="No class data yet for the selected filters." />
       return (
         <div>
-          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Class Comparison — Average Progress Level</div>
+          <div style={{ fontWeight: 600, color: '#2D3748', marginBottom: 4 }}>Class Comparison — Average Student Level</div>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginBottom: 20 }}>
-            Each class's average level score across all logged activities (M=1 → P=4)
+            Each class's average level across its students, one stage per student (M=1 → P=4)
+            {gradeFilter !== 'All' ? ` · ${gradeFilter}` : ''} {termFilter !== 'All' ? ` · ${termFilter}` : ''}
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={classCompData} margin={{ top: 20, right: 20, left: -20, bottom: 0 }}>
@@ -425,13 +478,19 @@ export default function ReportsPage({ role }) {
               <YAxis domain={[0, 4]} ticks={[1,2,3,4]}
                 tickFormatter={v => (['','M','A','R','P'][v] || '')}
                 tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v) => [`${v} (${['','M','A','R','P'][Math.round(v)] || ''})`, 'Avg Level']} />
+              <Tooltip formatter={(v, n, item) => [
+                `${v} (${['','M','A','R','P'][Math.round(v)] || ''}) · ${item.payload.logged} of ${item.payload.students} students logged`,
+                'Avg Level',
+              ]} />
               <Bar dataKey="avgScore" fill={TEAL} radius={[6,6,0,0]}
                 label={{ position: 'top', fontSize: 10, formatter: v => ['','M','A','R','P'][Math.round(v)] || '' }} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ fontSize: 12, color: '#A0AEC0', marginTop: 12 }}>
             Y-axis: 1=M · 2=A · 3=R · 4=P
+          </div>
+          <div style={{ fontSize: 12, color: '#718096', marginTop: 8 }}>
+            Students logged: {classCompData.map(c => `${c.class} ${c.logged}/${c.students}`).join(' · ')}
           </div>
         </div>
       )
@@ -493,7 +552,7 @@ export default function ReportsPage({ role }) {
             </select>
           </div>
           <div style={{ fontSize: 12, color: '#A0AEC0', alignSelf: 'flex-end', paddingBottom: 10 }}>
-            {records.length} records · {students.length} students
+            {[...new Set(records.map(getStudId).filter(id => studentIds.has(id)))].length} of {students.length} students have logs
           </div>
           {role === 'admin' && (
             <button
