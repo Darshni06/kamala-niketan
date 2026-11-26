@@ -96,14 +96,14 @@ export default function ReportsPage({ role }) {
   const { profile } = useAuth()
 
   const GRAPH_TYPES = [
-    { id: 'stacked',   icon: '▦', label: 'Stacked Bar'     },
+    { id: 'heatmap',   icon: '⊞', label: 'Heatmap'          },
     { id: 'line',      icon: '↗', label: 'Progress Line'    },
     { id: 'donut',     icon: '◎', label: 'Donut / Pie'      },
-    { id: 'heatmap',   icon: '⊞', label: 'Heatmap'          },
     { id: 'classcomp', icon: '⧖', label: 'Class Comparison' },
+    { id: 'stacked',   icon: '▦', label: 'Stacked Bar'      },
   ]
 
-  const [graphType,    setGraphType]    = useState('stacked')
+  const [graphType,    setGraphType]    = useState('heatmap')
   const [classFilter,  setClassFilter]  = useState(role === 'teacher' ? profile?.classId : 'All')
   const [gradeFilter,  setGradeFilter]  = useState('All')
   const [termFilter,   setTermFilter]   = useState('All')
@@ -521,7 +521,7 @@ export default function ReportsPage({ role }) {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, marginBottom: 12 }}>
           Select Graph Type
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
           {GRAPH_TYPES.map(g => (
             <button key={g.id}
               className={`graph-type-btn ${graphType === g.id ? 'active' : ''}`}

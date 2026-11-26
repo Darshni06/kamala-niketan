@@ -227,9 +227,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        {/* Header — stays pinned at the top */}
+        <div className="log-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div>
             <div style={{ fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 700, color: '#2D3748' }}>
               Log Progress
@@ -247,239 +247,231 @@ export default function ProgressModal({ student, onClose, onSaved }) {
               style={{ fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap' }}>
               {downloadingObs ? '…' : '📥 Observations'}
             </button>
-            {/* FIX 3: the cross mark always closes, regardless of unsaved/saved state */}
+            {/* The cross mark always closes, regardless of unsaved/saved state */}
             <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
           </div>
         </div>
-        <div className="divider" />
 
-        {/* FIX 3: transient success banner instead of replacing the whole modal */}
-        {savedBanner && (
-          <div className="success-box" style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-            ✅ Progress saved for {student.name}. Keep going, or close whenever you're done.
-          </div>
-        )}
-
-        {loading ? <Spinner center /> : (
-          <>
-            {/* Subject + Category */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-              <div>
-                <label className="form-label">Subject</label>
-                <select className="form-select" value={selSubject}
-                  onChange={e => { setSelSubject(e.target.value); setSelCategory('') }}>
-                  <option value="">Select subject...</option>
-                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Category</label>
-                <select className="form-select" value={selCategory}
-                  onChange={e => setSelCategory(e.target.value)}
-                  disabled={!selSubject}>
-                  <option value="">Select category...</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
+        {/* Scrollable body */}
+        <div className="log-body">
+          {savedBanner && (
+            <div className="success-box" style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              ✅ Progress saved for {student.name}. Keep going, or close whenever you're done.
             </div>
+          )}
 
-            {/* Date */}
-            {selCategory && (
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Date</label>
-                <input type="date" className="form-input" value={date}
-                  onChange={e => setDate(e.target.value)} style={{ maxWidth: 220 }} />
-              </div>
-            )}
-
-            {/* Term tabs */}
-            {selCategory && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase', letterSpacing: .8, flexShrink: 0 }}>
-                  Recording for:
-                </span>
-                {['T1', 'T2', 'T3'].map(t => (
-                  <div key={t} className={`term-tab ${term === t ? 'active' : ''}`} onClick={() => setTerm(t)}>
-                    {t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3'}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Activities table — grouped under skill subheadings (FIX 2) */}
-            {selCategory && (
-              <div className="glass" style={{ borderRadius: 12, padding: '4px 14px', marginBottom: 14 }}>
-                {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
-                  <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
-                    Activity
-                  </div>
-                  <div style={{ width: 80, textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
-                    Count
-                  </div>
-                  {LEVELS.map(l => (
-                    <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
-                  ))}
+          {loading ? <Spinner center /> : (
+            <>
+              {/* Selections in one row: Subject · Category · Date · Term */}
+              <div className="log-controls">
+                <div>
+                  <label className="form-label">Subject</label>
+                  <select className="form-select" value={selSubject}
+                    onChange={e => { setSelSubject(e.target.value); setSelCategory('') }}>
+                    <option value="">Select subject...</option>
+                    {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
-
-                {groupsLoading ? (
-                  <div style={{ padding: '20px 0' }}><Spinner center /></div>
-                ) : skillGroups.length === 0 ? (
-                  <div style={{ padding: '16px 0', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
-                    No skills under this category. Add them in Curriculum.
+                <div>
+                  <label className="form-label">Category</label>
+                  <select className="form-select" value={selCategory}
+                    onChange={e => setSelCategory(e.target.value)}
+                    disabled={!selSubject}>
+                    <option value="">Select category...</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                {selCategory && (
+                  <div>
+                    <label className="form-label">Date</label>
+                    <input type="date" className="form-input" value={date}
+                      onChange={e => setDate(e.target.value)} />
                   </div>
-                ) : skillGroups.map(group => (
-                  <div key={group.skill.id}>
-                    {/* Skill subheading — replaces the old skill dropdown */}
-                    <div style={{
-                      fontSize: 11, fontWeight: 800, color: '#2a7a74', textTransform: 'uppercase',
-                      letterSpacing: .8, padding: '12px 0 6px',
-                    }}>
-                      {group.skill.name}
+                )}
+                {selCategory && (
+                  <div>
+                    <label className="form-label">Recording for</label>
+                    <div className="log-term-group">
+                      {['T1', 'T2', 'T3'].map(t => (
+                        <div key={t} className={`term-tab ${term === t ? 'active' : ''}`} onClick={() => setTerm(t)}>
+                          {t === 'T1' ? 'Term 1' : t === 'T2' ? 'Term 2' : 'Term 3'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!selCategory ? (
+                <div className="log-hint">
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📝</div>
+                  Choose a subject and category to start logging {student.name.split(' ')[0]}'s progress.
+                </div>
+              ) : (
+                <div className="log-split">
+                  {/* Left: activities grouped under skill subheadings */}
+                  <div className="glass" style={{ borderRadius: 12, padding: '4px 16px', minWidth: 0 }}>
+                    <div className="log-act-head" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
+                      <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
+                        Activity
+                      </div>
+                      <div style={{ width: 80, textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
+                        Count
+                      </div>
+                      {LEVELS.map(l => (
+                        <div key={l} style={{ width: 38, textAlign: 'center', fontSize: 11, fontWeight: 800, color: LEVEL_COLORS[l] }}>{l}</div>
+                      ))}
                     </div>
 
-                    {group.activities.length === 0 ? (
-                      <div style={{ padding: '10px 0', fontSize: 12, color: '#A0AEC0' }}>
-                        No activities under this skill. Add them in Curriculum.
+                    {groupsLoading ? (
+                      <div style={{ padding: '20px 0' }}><Spinner center /></div>
+                    ) : skillGroups.length === 0 ? (
+                      <div style={{ padding: '16px 0', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
+                        No skills under this category. Add them in Curriculum.
                       </div>
-                    ) : group.activities.map(act => {
-                      const curr        = levels[act.id]
-                      const existingRec = existing[act.id]
-                      const totalSoFar  = existingRec?.totalCount || 0
-                      const pastDates   = existingRec?.dates || []
+                    ) : skillGroups.map(group => (
+                      <div key={group.skill.id}>
+                        <div style={{
+                          fontSize: 11, fontWeight: 800, color: '#2a7a74', textTransform: 'uppercase',
+                          letterSpacing: .8, padding: '12px 0 6px',
+                        }}>
+                          {group.skill.name}
+                        </div>
 
-                      return (
-                        <div key={act.id} style={{ padding: '10px 0', borderBottom: '1px solid #F7FAFC' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ flex: 1, fontSize: 12, color: '#4A5568', lineHeight: 1.4 }}>
-                              {act.name}
-                            </div>
-                            {/* Count input */}
-                            <div style={{ width: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                              <input
-                                type="number" min="0" placeholder="Add"
-                                value={counts[act.id] || ''}
-                                onChange={e => setCounts(prev => ({ ...prev, [act.id]: e.target.value }))}
-                                style={{
-                                  width: 54, border: '1.5px solid #E2E8F0', borderRadius: 8,
-                                  padding: '4px 6px', fontSize: 12, textAlign: 'center',
-                                  outline: 'none', color: '#4A5568', background: '#FAFAFA',
-                                }}
-                              />
-                              {totalSoFar > 0 && (
-                                <span style={{ fontSize: 10, color: '#A0AEC0' }}>total: {totalSoFar}</span>
+                        {group.activities.length === 0 ? (
+                          <div style={{ padding: '10px 0', fontSize: 12, color: '#A0AEC0' }}>
+                            No activities under this skill. Add them in Curriculum.
+                          </div>
+                        ) : group.activities.map(act => {
+                          const curr        = levels[act.id]
+                          const existingRec = existing[act.id]
+                          const totalSoFar  = existingRec?.totalCount || 0
+                          const pastDates   = existingRec?.dates || []
+
+                          return (
+                            <div key={act.id} style={{ padding: '10px 0', borderBottom: '1px solid #F7FAFC' }}>
+                              <div className="log-act-row">
+                                <div className="log-act-name" style={{ fontSize: 13, color: '#4A5568', lineHeight: 1.4 }}>
+                                  {act.name}
+                                </div>
+                                <div style={{ width: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                  <input
+                                    type="number" min="0" placeholder="Add"
+                                    value={counts[act.id] || ''}
+                                    onChange={e => setCounts(prev => ({ ...prev, [act.id]: e.target.value }))}
+                                    style={{
+                                      width: 54, border: '1.5px solid #E2E8F0', borderRadius: 8,
+                                      padding: '4px 6px', fontSize: 12, textAlign: 'center',
+                                      outline: 'none', color: '#4A5568', background: '#FAFAFA',
+                                    }}
+                                  />
+                                  {totalSoFar > 0 && (
+                                    <span style={{ fontSize: 10, color: '#A0AEC0' }}>total: {totalSoFar}</span>
+                                  )}
+                                </div>
+                                {LEVELS.map(l => {
+                                  const isSelected = curr === l
+                                  return (
+                                    <div key={l}
+                                      onClick={() => setActivityLevel(act.id, l)}
+                                      style={{
+                                        width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, fontWeight: 800, cursor: 'pointer', transition: 'all .15s',
+                                        background: isSelected ? LEVEL_COLORS[l] : `${LEVEL_COLORS[l]}22`,
+                                        color:      isSelected ? 'white' : LEVEL_COLORS[l],
+                                        border:     `2px solid ${isSelected ? LEVEL_COLORS[l] : 'transparent'}`,
+                                        transform:  isSelected ? 'scale(1.1)' : 'scale(1)',
+                                        boxShadow:  isSelected ? `0 2px 8px ${LEVEL_COLORS[l]}55` : 'none',
+                                        userSelect: 'none',
+                                      }}>
+                                      {l}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              {pastDates.length > 0 && (
+                                <div style={{ fontSize: 10, color: '#A0AEC0', marginTop: 4, paddingLeft: 4 }}>
+                                  📅 Previously logged: {pastDates.slice(-3).join(', ')}{pastDates.length > 3 ? ` +${pastDates.length - 3} more` : ''}
+                                </div>
                               )}
                             </div>
-                            {/* Level pills */}
-                            {LEVELS.map(l => {
-                              const isSelected = curr === l
-                              return (
-                                <div key={l}
-                                  onClick={() => setActivityLevel(act.id, l)}
-                                  style={{
-                                    width: 38, height: 38, borderRadius: 8, flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: 12, fontWeight: 800, cursor: 'pointer', transition: 'all .15s',
-                                    background: isSelected ? LEVEL_COLORS[l] : `${LEVEL_COLORS[l]}22`,
-                                    color:      isSelected ? 'white' : LEVEL_COLORS[l],
-                                    border:     `2px solid ${isSelected ? LEVEL_COLORS[l] : 'transparent'}`,
-                                    transform:  isSelected ? 'scale(1.1)' : 'scale(1)',
-                                    boxShadow:  isSelected ? `0 2px 8px ${LEVEL_COLORS[l]}55` : 'none',
-                                    userSelect: 'none',
-                                  }}>
-                                  {l}
-                                </div>
-                              )
-                            })}
-                          </div>
-                          {/* Show past dates if any */}
-                          {pastDates.length > 0 && (
-                            <div style={{ fontSize: 10, color: '#A0AEC0', marginTop: 4, paddingLeft: 4 }}>
-                              📅 Previously logged: {pastDates.slice(-3).join(', ')}{pastDates.length > 3 ? ` +${pastDates.length - 3} more` : ''}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
 
-            {/* Teacher note */}
-            {selCategory && (
-              <div>
-                {/* Month picker for observation */}
-                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 10 }}>
-                  <div style={{ flex: 1 }}>
-                    <label className="form-label">Observation Month</label>
-                    <input type="month" className="form-input"
-                      value={selectedMonth}
-                      onChange={e => setSelectedMonth(e.target.value)}
-                      style={{ maxWidth: 180 }} />
-                  </div>
+                  {/* Right: monthly observation — fills the space that used to sit empty */}
+                  <aside className="log-side glass" style={{ borderRadius: 12, padding: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#2D3748', marginBottom: 12 }}>Monthly Observation</div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label className="form-label">Observation Month</label>
+                      <input type="month" className="form-input"
+                        value={selectedMonth}
+                        onChange={e => setSelectedMonth(e.target.value)} />
+                    </div>
+
+                    {pastNotes.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <label className="form-label">Previous Observations</label>
+                        <select className="form-select"
+                          onChange={e => {
+                            const selected = pastNotes.find(n => n.id === e.target.value)
+                            if (selected) setNote(selected.note)
+                          }}
+                          defaultValue="">
+                          <option value="">Select a past month to view...</option>
+                          {pastNotes.map(n => (
+                            <option key={n.id} value={n.id}>
+                              {n.month || 'No month'} — {(n.note || '').slice(0, 40)}...
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <label className="form-label">
+                      Observation for {selectedMonth}
+                      <span style={{ color: '#A0AEC0', textTransform: 'none', fontWeight: 400, marginLeft: 4, fontSize: 11 }}>(optional)</span>
+                    </label>
+                    <textarea className="form-textarea" rows={6}
+                      placeholder="Add your observations for this month..."
+                      value={note} onChange={e => setNote(e.target.value)}
+                      style={{ resize: 'vertical' }} />
+                    <div className="ai-note-box">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                        <span style={{ fontSize: 14 }}>🤖</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#2a7a74', textTransform: 'uppercase', letterSpacing: .8 }}>AI Report Note</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.5 }}>
+                        Your note will be used by AI to generate the narrative paragraph in the report card.
+                      </div>
+                    </div>
+                  </aside>
                 </div>
+              )}
+            </>
+          )}
+        </div>
 
-                {/* Past observations dropdown */}
-                {pastNotes.length > 0 && (
-                  <div style={{ marginBottom: 10 }}>
-                    <label className="form-label">Previous Observations</label>
-                    <select className="form-select"
-                      onChange={e => {
-                        const selected = pastNotes.find(n => n.id === e.target.value)
-                        if (selected) setNote(selected.note)
-                      }}
-                      defaultValue="">
-                      <option value="">Select a past month to view...</option>
-                      {pastNotes.map(n => (
-                        <option key={n.id} value={n.id}>
-                          {n.month || 'No month'} — {(n.note || '').slice(0, 40)}...
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <label className="form-label">
-                  Observation for {selectedMonth}
-                  <span style={{ color: '#A0AEC0', textTransform: 'none', fontWeight: 400, marginLeft: 4, fontSize: 11 }}>(optional)</span>
-                </label>
-                <textarea className="form-textarea" rows={3}
-                  placeholder="Add your observations for this month..."
-                  value={note} onChange={e => setNote(e.target.value)}
-                  style={{ resize: 'vertical' }} />
-                <div className="ai-note-box">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                    <span style={{ fontSize: 14 }}>🤖</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#2a7a74', textTransform: 'uppercase', letterSpacing: .8 }}>AI Report Note</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.5 }}>
-                    Your note will be used by AI to generate the narrative paragraph in the report card.
-                  </div>
-                </div>
-              </div>
+        {/* Footer — Save buttons stay visible without scrolling.
+            "Save" keeps the window open; "Save & Close" or the × closes it. */}
+        {!loading && selCategory && (
+          <div className="log-foot">
+            {saveError && (
+              <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>⚠️ {saveError}</div>
             )}
-
-            {/* Save — FIX 3: saving no longer closes the modal by default.
-                "Save" keeps it open so the teacher can pick another subject/category
-                for the same student. "Save & Close" or the × does the closing. */}
-            {selCategory && (
-              <div style={{ marginTop: 16 }}>
-                {saveError && (
-                  <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>⚠️ {saveError}</div>
-                )}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
-                  <button className="btn-primary" style={{ flex: 2 }} onClick={() => handleSave(false)} disabled={saving}>
-                    {saving ? 'Saving…' : 'Save'}
-                  </button>
-                  <button className="btn-peach" style={{ flex: 2 }} onClick={() => handleSave(true)} disabled={saving}>
-                    {saving ? 'Saving…' : 'Save & Close'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
+            <div className="log-foot-actions">
+              <button className="btn-ghost" onClick={onClose}>Close</button>
+              <button className="btn-primary" onClick={() => handleSave(false)} disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn-peach" onClick={() => handleSave(true)} disabled={saving}>
+                {saving ? 'Saving…' : 'Save & Close'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
