@@ -68,6 +68,7 @@ input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
 }
 
 .main {
+  flex: 1 1 auto; min-width: 0; width: calc(100% - 220px);
   margin-left: 220px; min-height: 100vh; padding: 32px;
   background: ${BG};
   background-image:
@@ -298,6 +299,9 @@ input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
 @media (max-width: 900px) {
   .sidebar { width: 60px; }
   .sidebar .nav-label, .sidebar .brand-text, .sidebar .user-info { display: none; }
-  .main { margin-left: 60px; padding: 20px; }
+  .main { margin-left: 60px; width: calc(100% - 60px); padding: 20px; }
+}
+@media (max-width: 520px) {
+  .main { padding: 14px; }
 }
 `

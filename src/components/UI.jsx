@@ -137,7 +137,7 @@ export function PageHeader({ role, title, subtitle, action }) {
   return (
     <div style={{ marginBottom: 28 }}>
       <div className="screen-label">{role === 'admin' ? 'Admin View' : 'Teacher View'}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ fontFamily: 'Playfair Display', fontSize: 26, fontWeight: 700, color: '#2D3748' }}>{title}</div>
           {subtitle && <div style={{ fontSize: 14, color: '#718096', marginTop: 4 }}>{subtitle}</div>}

@@ -74,7 +74,7 @@ export default function AdminDashboard() {
       {error && <div className="error-box" style={{ marginBottom: 16 }}>{error}</div>}
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 36 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 36 }}>
         {[
           { label: 'Total Students', value: students.length,  icon: '🎓', color: TEAL     },
           { label: 'Classes',        value: classes.length,   icon: '🏫', color: '#7C6BDB' },
@@ -99,7 +99,7 @@ export default function AdminDashboard() {
           No students added yet. Go to Students → Add Student or Import Excel.
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
           {classes.map(cls => {
             const total     = cls.students.length
             const logged    = cls.loggedTodayIds.size
