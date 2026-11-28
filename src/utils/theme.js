@@ -281,6 +281,33 @@ input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
 .log-foot-actions button { min-width: 130px; }
 .log-hint { text-align: center; padding: 48px 16px; color: #A0AEC0; font-size: 14px; }
 
+/* Log window hierarchy: Category (banner) > Skill (sub-topic) > Activity (row) */
+.log-colhead {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+  position: sticky; top: -18px; z-index: 3;
+  background: rgba(255,255,255,.96); border-bottom: 1px solid #EDF2F7; border-radius: 10px 10px 0 0;
+}
+.log-cat { border-radius: 12px; margin-top: 12px; overflow: hidden; }
+.log-cat:first-of-type { margin-top: 0; }
+.log-cat-head {
+  display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;
+  padding: 12px 14px; font-size: 14px; font-weight: 700; color: #1f5f5a; letter-spacing: .2px;
+  background: linear-gradient(90deg, rgba(59,191,178,.20), rgba(59,191,178,.06));
+  border-left: 5px solid #3BBFB2;
+}
+.log-cat-head:hover { background: linear-gradient(90deg, rgba(59,191,178,.28), rgba(59,191,178,.10)); }
+.log-cat-chevron { display: inline-block; transition: transform .18s; color: #3BBFB2; font-size: 13px; }
+.log-cat-count {
+  font-size: 11px; font-weight: 700; color: #2a7a74; background: rgba(255,255,255,.85);
+  border-radius: 20px; padding: 2px 10px; white-space: nowrap;
+}
+.log-skill-head {
+  margin: 12px 0 2px; padding: 5px 10px; font-size: 11px; font-weight: 800; letter-spacing: .8px;
+  text-transform: uppercase; color: #c4684b; background: rgba(232,135,106,.08);
+  border-left: 3px solid #E8876A; border-radius: 0 6px 6px 0;
+}
+.log-act { padding: 10px 0 10px 12px; }
+
 @media (max-width: 900px) {
   .log-split { grid-template-columns: 1fr; }
   .log-side { position: static; }
@@ -289,6 +316,7 @@ input, select, textarea, button { font-family: 'DM Sans', sans-serif; }
   .modal-overlay { padding: 8px; }
   .modal.modal-wide { max-height: 97vh; border-radius: 16px; }
   .log-head, .log-body, .log-foot { padding-left: 16px; padding-right: 16px; }
+  .log-colhead { top: -18px; }
   .log-act-row { flex-wrap: wrap; }
   .log-act-name { flex: 1 1 100%; }
   .log-act-head { display: none !important; }

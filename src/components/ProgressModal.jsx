@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabase/client'
 import { useAuth } from '../contexts/AuthContext'
-import { LEVELS, LEVEL_COLORS } from '../utils/theme'
+import { LEVELS, LEVEL_COLORS, TEAL, PEACH } from '../utils/theme'
 import { GradeBadge, Spinner } from './UI'
 import {
   saveProgressRecord,
@@ -20,33 +20,32 @@ export default function ProgressModal({ student, onClose, onSaved }) {
   const { profile } = useAuth()
 
   const [subjects,    setSubjects]    = useState([])
-  const [categories,  setCategories]  = useState([])
-  // FIX 2: skills are no longer a separate selection step. Instead, once a
-  // category is chosen we load every skill under it plus that skill's
-  // activities, and render each skill as a subheading above its activities.
-  const [skillGroups, setSkillGroups] = useState([]) // [{ skill, activities: [...] }]
+  // Choosing a Subject loads its whole tree in one go and shows it open:
+  //   Category (section)  →  Skill (sub-topic)  →  Activities (rows)
+  // so there is no Category or Skill dropdown to step through.
+  const [categoryGroups, setCategoryGroups] = useState([]) // [{ category, skills: [{ skill, activities }] }]
+  const [collapsed,   setCollapsed]   = useState(new Set()) // category ids the teacher folded away
 
   const [selSubject,  setSelSubject]  = useState('')
-  const [selCategory, setSelCategory] = useState('')
   const [term,        setTerm]        = useState('T1')
   const [date,        setDate]        = useState(new Date().toISOString().split('T')[0])
 
   // Per-activity state
   const [levels,      setLevels]      = useState({})  // activityId → level
   const [counts,      setCounts]      = useState({})  // activityId → new count to add
-  const [existing,    setExisting]    = useState({})  // activityId → { level, total_practice_count, dates }
+  const [existing,    setExisting]    = useState({})  // activityId → { level, totalCount, dates }
 
   const [note,        setNote]        = useState('')
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)) // YYYY-MM
-  const [pastNotes,   setPastNotes]   = useState([]) // previous observations for this subject
+  const [pastNotes,   setPastNotes]   = useState([])
   const [loading,     setLoading]     = useState(true)
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [saving,      setSaving]      = useState(false)
-  const [savedBanner, setSavedBanner] = useState(false) // FIX 3: transient banner, not a full-screen takeover
+  const [savedBanner, setSavedBanner] = useState(false)
   const [saveError,   setSaveError]   = useState('')
   const [downloadingObs, setDownloadingObs] = useState(false)
 
-  const allActivities = skillGroups.flatMap(g => g.activities)
+  const allActivities = categoryGroups.flatMap(c => c.skills.flatMap(s => s.activities))
 
   // Load subjects
   useEffect(() => {
@@ -56,30 +55,41 @@ export default function ProgressModal({ student, onClose, onSaved }) {
       .finally(() => setLoading(false))
   }, [student.grade])
 
-  // Load categories when subject changes
+  // Load the whole Category → Skill → Activity tree when the subject changes
   useEffect(() => {
-    if (!selSubject) return
-    setSelCategory(''); setSkillGroups([]); setLevels({}); setCounts({})
-    getCategoriesBySubject(selSubject).then(setCategories)
-  }, [selSubject])
-
-  // FIX 2: load every skill under the chosen category, and every activity
-  // under each of those skills, in one go — no more skill dropdown.
-  useEffect(() => {
-    if (!selCategory) { setSkillGroups([]); return }
-    setLevels({}); setCounts({})
+    setLevels({}); setCounts({}); setCollapsed(new Set())
+    if (!selSubject) { setCategoryGroups([]); return }
+    let cancelled = false
     setGroupsLoading(true)
     const load = async () => {
-      const skillsList = await getSkillsByCategory(selCategory)
-      const groups = await Promise.all(skillsList.map(async sk => {
-        const acts = await getActivitiesBySkill(sk.id)
-        return { skill: sk, activities: acts.map(a => ({ ...a, skillId: sk.id, skillName: sk.name })) }
-      }))
-      setSkillGroups(groups)
-      setGroupsLoading(false)
+      try {
+        const cats = await getCategoriesBySubject(selSubject)
+        const groups = await Promise.all(cats.map(async cat => {
+          const skillList = await getSkillsByCategory(cat.id)
+          const skills = await Promise.all(skillList.map(async sk => {
+            const acts = await getActivitiesBySkill(sk.id)
+            return {
+              skill: sk,
+              activities: acts.map(a => ({
+                ...a,
+                skillId: sk.id,       skillName: sk.name,
+                categoryId: cat.id,   categoryName: cat.name,
+              })),
+            }
+          }))
+          return { category: cat, skills }
+        }))
+        if (!cancelled) setCategoryGroups(groups)
+      } catch (e) {
+        console.error('Failed to load curriculum tree:', e)
+        if (!cancelled) setCategoryGroups([])
+      } finally {
+        if (!cancelled) setGroupsLoading(false)
+      }
     }
     load()
-  }, [selCategory])
+    return () => { cancelled = true }
+  }, [selSubject])
 
   // Load existing progress + pre-fill levels whenever the activity set or term changes
   useEffect(() => {
@@ -105,9 +115,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skillGroups, term, student.id])
+  }, [categoryGroups, term, student.id])
 
-  // Past teacher notes for this subject (notes are scoped by subject + month, not skill)
+  // Past teacher notes for this subject (notes are scoped by subject + month)
   useEffect(() => {
     if (!selSubject) { setPastNotes([]); return }
     supabase
@@ -123,10 +133,15 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     setLevels(prev => ({ ...prev, [actId]: prev[actId] === lvl ? null : lvl }))
   }
 
-  // FIX 3: saving no longer force-closes the modal. `closeAfter` lets the
-  // teacher explicitly choose to save-and-close; the default Save keeps the
-  // modal open so they can keep navigating between subjects/categories for
-  // the same student without having to re-open and re-pick the student.
+  const toggleCategory = (catId) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      next.has(catId) ? next.delete(catId) : next.add(catId)
+      return next
+    })
+  }
+
+  // "Save" keeps the window open; "Save & Close" (or the ×) closes it.
   const handleSave = async (closeAfter = false) => {
     const toSave = allActivities.filter(a => levels[a.id])
     if (toSave.length === 0 && !note.trim()) {
@@ -135,8 +150,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
     }
     setSaving(true); setSaveError('')
 
-    const subject  = subjects.find(s => s.id === selSubject)
-    const category = categories.find(c => c.id === selCategory)
+    const subject = subjects.find(s => s.id === selSubject)
 
     try {
       for (const act of toSave) {
@@ -147,9 +161,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           grade:         student.grade,
           term,
           subjectId:     selSubject,
-          subjectName:   subject?.name    || '',
-          categoryId:    selCategory,
-          categoryName:  category?.name   || '',
+          subjectName:   subject?.name || '',
+          categoryId:    act.categoryId,
+          categoryName:  act.categoryName || '',
           skillId:       act.skillId,
           skillName:     act.skillName,
           activityId:          act.id,
@@ -178,9 +192,6 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
       onSaved?.()
 
-      // Refresh "existing" progress so saved levels/counts/dates show as logged,
-      // and clear the new-count inputs + note so the teacher can log the next
-      // thing without stale values lingering.
       const progressRecs = await getProgressByStudent(student.id)
       const actIds = new Set(allActivities.map(a => a.id))
       const existingMap = {}
@@ -200,9 +211,7 @@ export default function ProgressModal({ student, onClose, onSaved }) {
       setSavedBanner(true)
       setTimeout(() => setSavedBanner(false), 2200)
 
-      if (closeAfter) {
-        onClose()
-      }
+      if (closeAfter) onClose()
     } catch (err) {
       console.error('Save failed:', err)
       setSaveError('Save failed: ' + (err?.message || 'Unknown error'))
@@ -224,6 +233,9 @@ export default function ProgressModal({ student, onClose, onSaved }) {
       setDownloadingObs(false)
     }
   }
+
+  const totalActivities = allActivities.length
+  const markedActivities = allActivities.filter(a => levels[a.id]).length
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -247,7 +259,6 @@ export default function ProgressModal({ student, onClose, onSaved }) {
               style={{ fontSize: 11, padding: '6px 12px', whiteSpace: 'nowrap' }}>
               {downloadingObs ? '…' : '📥 Observations'}
             </button>
-            {/* The cross mark always closes, regardless of unsaved/saved state */}
             <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#A0AEC0' }}>×</button>
           </div>
         </div>
@@ -262,33 +273,24 @@ export default function ProgressModal({ student, onClose, onSaved }) {
 
           {loading ? <Spinner center /> : (
             <>
-              {/* Selections in one row: Subject · Category · Date · Term */}
+              {/* Selections in one row: Subject · Date · Term */}
               <div className="log-controls">
                 <div>
                   <label className="form-label">Subject</label>
                   <select className="form-select" value={selSubject}
-                    onChange={e => { setSelSubject(e.target.value); setSelCategory('') }}>
+                    onChange={e => setSelSubject(e.target.value)}>
                     <option value="">Select subject...</option>
                     {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="form-label">Category</label>
-                  <select className="form-select" value={selCategory}
-                    onChange={e => setSelCategory(e.target.value)}
-                    disabled={!selSubject}>
-                    <option value="">Select category...</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                {selCategory && (
+                {selSubject && (
                   <div>
                     <label className="form-label">Date</label>
                     <input type="date" className="form-input" value={date}
                       onChange={e => setDate(e.target.value)} />
                   </div>
                 )}
-                {selCategory && (
+                {selSubject && (
                   <div>
                     <label className="form-label">Recording for</label>
                     <div className="log-term-group">
@@ -302,16 +304,33 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                 )}
               </div>
 
-              {!selCategory ? (
+              {!selSubject ? (
                 <div className="log-hint">
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📝</div>
-                  Choose a subject and category to start logging {student.name.split(' ')[0]}'s progress.
+                  Choose a subject to see all its categories and activities for {student.name.split(' ')[0]}.
                 </div>
               ) : (
                 <div className="log-split">
-                  {/* Left: activities grouped under skill subheadings */}
-                  <div className="glass" style={{ borderRadius: 12, padding: '4px 16px', minWidth: 0 }}>
-                    <div className="log-act-head" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 0 8px', borderBottom: '1px solid #EDF2F7' }}>
+                  {/* Left: Category → Skill → Activities, all open */}
+                  <div style={{ minWidth: 0 }}>
+                    {/* toolbar */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, color: '#718096' }}>
+                        {categoryGroups.length} categor{categoryGroups.length === 1 ? 'y' : 'ies'} · {totalActivities} activities
+                        {markedActivities > 0 && <span style={{ color: TEAL, fontWeight: 700 }}> · {markedActivities} marked</span>}
+                      </div>
+                      {categoryGroups.length > 1 && (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                            onClick={() => setCollapsed(new Set())}>Expand all</button>
+                          <button className="btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                            onClick={() => setCollapsed(new Set(categoryGroups.map(c => c.category.id)))}>Collapse all</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* column header — stays visible while scrolling */}
+                    <div className="log-act-head log-colhead">
                       <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: '#A0AEC0', textTransform: 'uppercase', letterSpacing: .8 }}>
                         Activity
                       </div>
@@ -324,85 +343,109 @@ export default function ProgressModal({ student, onClose, onSaved }) {
                     </div>
 
                     {groupsLoading ? (
-                      <div style={{ padding: '20px 0' }}><Spinner center /></div>
-                    ) : skillGroups.length === 0 ? (
-                      <div style={{ padding: '16px 0', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
-                        No skills under this category. Add them in Curriculum.
+                      <div className="glass" style={{ borderRadius: 12, padding: '24px 0' }}><Spinner center /></div>
+                    ) : categoryGroups.length === 0 ? (
+                      <div className="glass" style={{ borderRadius: 12, padding: '24px 16px', fontSize: 13, color: '#A0AEC0', textAlign: 'center' }}>
+                        No categories under this subject. Add them in Curriculum.
                       </div>
-                    ) : skillGroups.map(group => (
-                      <div key={group.skill.id}>
-                        <div style={{
-                          fontSize: 11, fontWeight: 800, color: '#2a7a74', textTransform: 'uppercase',
-                          letterSpacing: .8, padding: '12px 0 6px',
-                        }}>
-                          {group.skill.name}
-                        </div>
+                    ) : categoryGroups.map(({ category, skills }) => {
+                      const catActs   = skills.flatMap(s => s.activities)
+                      const catMarked = catActs.filter(a => levels[a.id]).length
+                      const isOpen    = !collapsed.has(category.id)
 
-                        {group.activities.length === 0 ? (
-                          <div style={{ padding: '10px 0', fontSize: 12, color: '#A0AEC0' }}>
-                            No activities under this skill. Add them in Curriculum.
+                      return (
+                        <div key={category.id} className="glass log-cat">
+                          {/* LEVEL 1 — Category: bold banner */}
+                          <div className="log-cat-head" onClick={() => toggleCategory(category.id)}>
+                            <span className="log-cat-chevron" style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>▸</span>
+                            <span style={{ flex: 1, minWidth: 0 }}>{category.name}</span>
+                            <span className="log-cat-count">{catMarked}/{catActs.length}</span>
                           </div>
-                        ) : group.activities.map(act => {
-                          const curr        = levels[act.id]
-                          const existingRec = existing[act.id]
-                          const totalSoFar  = existingRec?.totalCount || 0
-                          const pastDates   = existingRec?.dates || []
 
-                          return (
-                            <div key={act.id} style={{ padding: '10px 0', borderBottom: '1px solid #F7FAFC' }}>
-                              <div className="log-act-row">
-                                <div className="log-act-name" style={{ fontSize: 13, color: '#4A5568', lineHeight: 1.4 }}>
-                                  {act.name}
+                          {isOpen && (
+                            <div style={{ padding: '4px 14px 8px' }}>
+                              {skills.length === 0 ? (
+                                <div style={{ padding: '10px 0', fontSize: 12, color: '#A0AEC0' }}>
+                                  No skills under this category. Add them in Curriculum.
                                 </div>
-                                <div style={{ width: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                  <input
-                                    type="number" min="0" placeholder="Add"
-                                    value={counts[act.id] || ''}
-                                    onChange={e => setCounts(prev => ({ ...prev, [act.id]: e.target.value }))}
-                                    style={{
-                                      width: 54, border: '1.5px solid #E2E8F0', borderRadius: 8,
-                                      padding: '4px 6px', fontSize: 12, textAlign: 'center',
-                                      outline: 'none', color: '#4A5568', background: '#FAFAFA',
-                                    }}
-                                  />
-                                  {totalSoFar > 0 && (
-                                    <span style={{ fontSize: 10, color: '#A0AEC0' }}>total: {totalSoFar}</span>
-                                  )}
-                                </div>
-                                {LEVELS.map(l => {
-                                  const isSelected = curr === l
-                                  return (
-                                    <div key={l}
-                                      onClick={() => setActivityLevel(act.id, l)}
-                                      style={{
-                                        width: 38, height: 38, borderRadius: 8, flexShrink: 0,
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: 12, fontWeight: 800, cursor: 'pointer', transition: 'all .15s',
-                                        background: isSelected ? LEVEL_COLORS[l] : `${LEVEL_COLORS[l]}22`,
-                                        color:      isSelected ? 'white' : LEVEL_COLORS[l],
-                                        border:     `2px solid ${isSelected ? LEVEL_COLORS[l] : 'transparent'}`,
-                                        transform:  isSelected ? 'scale(1.1)' : 'scale(1)',
-                                        boxShadow:  isSelected ? `0 2px 8px ${LEVEL_COLORS[l]}55` : 'none',
-                                        userSelect: 'none',
-                                      }}>
-                                      {l}
+                              ) : skills.map(({ skill, activities }) => (
+                                <div key={skill.id}>
+                                  {/* LEVEL 2 — Skill: small coloured sub-topic */}
+                                  <div className="log-skill-head" style={{ borderLeftColor: PEACH }}>
+                                    {skill.name}
+                                  </div>
+
+                                  {activities.length === 0 ? (
+                                    <div style={{ padding: '8px 0 8px 12px', fontSize: 12, color: '#A0AEC0' }}>
+                                      No activities under this skill.
                                     </div>
-                                  )
-                                })}
-                              </div>
-                              {pastDates.length > 0 && (
-                                <div style={{ fontSize: 10, color: '#A0AEC0', marginTop: 4, paddingLeft: 4 }}>
-                                  📅 Previously logged: {pastDates.slice(-3).join(', ')}{pastDates.length > 3 ? ` +${pastDates.length - 3} more` : ''}
+                                  ) : activities.map(act => {
+                                    const curr        = levels[act.id]
+                                    const existingRec = existing[act.id]
+                                    const totalSoFar  = existingRec?.totalCount || 0
+                                    const pastDates   = existingRec?.dates || []
+
+                                    // LEVEL 3 — Activity: plain indented row
+                                    return (
+                                      <div key={act.id} className="log-act" style={{ borderBottom: '1px solid #F7FAFC' }}>
+                                        <div className="log-act-row">
+                                          <div className="log-act-name" style={{ fontSize: 13, color: '#4A5568', lineHeight: 1.4 }}>
+                                            {act.name}
+                                          </div>
+                                          <div style={{ width: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                            <input
+                                              type="number" min="0" placeholder="Add"
+                                              value={counts[act.id] || ''}
+                                              onChange={e => setCounts(prev => ({ ...prev, [act.id]: e.target.value }))}
+                                              style={{
+                                                width: 54, border: '1.5px solid #E2E8F0', borderRadius: 8,
+                                                padding: '4px 6px', fontSize: 12, textAlign: 'center',
+                                                outline: 'none', color: '#4A5568', background: '#FAFAFA',
+                                              }}
+                                            />
+                                            {totalSoFar > 0 && (
+                                              <span style={{ fontSize: 10, color: '#A0AEC0' }}>total: {totalSoFar}</span>
+                                            )}
+                                          </div>
+                                          {LEVELS.map(l => {
+                                            const isSelected = curr === l
+                                            return (
+                                              <div key={l}
+                                                onClick={() => setActivityLevel(act.id, l)}
+                                                style={{
+                                                  width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+                                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                  fontSize: 12, fontWeight: 800, cursor: 'pointer', transition: 'all .15s',
+                                                  background: isSelected ? LEVEL_COLORS[l] : `${LEVEL_COLORS[l]}22`,
+                                                  color:      isSelected ? 'white' : LEVEL_COLORS[l],
+                                                  border:     `2px solid ${isSelected ? LEVEL_COLORS[l] : 'transparent'}`,
+                                                  transform:  isSelected ? 'scale(1.1)' : 'scale(1)',
+                                                  boxShadow:  isSelected ? `0 2px 8px ${LEVEL_COLORS[l]}55` : 'none',
+                                                  userSelect: 'none',
+                                                }}>
+                                                {l}
+                                              </div>
+                                            )
+                                          })}
+                                        </div>
+                                        {pastDates.length > 0 && (
+                                          <div style={{ fontSize: 10, color: '#A0AEC0', marginTop: 4 }}>
+                                            📅 Previously logged: {pastDates.slice(-3).join(', ')}{pastDates.length > 3 ? ` +${pastDates.length - 3} more` : ''}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
                                 </div>
-                              )}
+                              ))}
                             </div>
-                          )
-                        })}
-                      </div>
-                    ))}
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
 
-                  {/* Right: monthly observation — fills the space that used to sit empty */}
+                  {/* Right: monthly observation */}
                   <aside className="log-side glass" style={{ borderRadius: 12, padding: 16 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#2D3748', marginBottom: 12 }}>Monthly Observation</div>
                     <div style={{ marginBottom: 12 }}>
@@ -455,9 +498,8 @@ export default function ProgressModal({ student, onClose, onSaved }) {
           )}
         </div>
 
-        {/* Footer — Save buttons stay visible without scrolling.
-            "Save" keeps the window open; "Save & Close" or the × closes it. */}
-        {!loading && selCategory && (
+        {/* Footer — Save buttons stay visible without scrolling */}
+        {!loading && selSubject && (
           <div className="log-foot">
             {saveError && (
               <div className="error-box" style={{ marginBottom: 10, fontSize: 13 }}>⚠️ {saveError}</div>
